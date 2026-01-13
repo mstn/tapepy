@@ -87,6 +87,12 @@ pub fn infer_expression(expr: &Expr) -> DeductionTree {
     infer_expr(expr, &context)
 }
 
+pub fn infer_predicate(expr: &Expr) -> DeductionTree {
+    let mut context = Context::default();
+    collect_free_vars(expr, &mut context);
+    infer_predicate_expr(expr, &context)
+}
+
 fn infer_expr(expr: &Expr, context: &Context) -> DeductionTree {
     match expr {
         Expr::Name(ExprName { id, .. }) => {
@@ -194,6 +200,92 @@ fn infer_expr(expr: &Expr, context: &Context) -> DeductionTree {
         }
         _ => panic!("unsupported Python expression: {:?}", expr),
     }
+}
+
+fn infer_predicate_expr(expr: &Expr, context: &Context) -> DeductionTree {
+    match expr {
+        Expr::UnaryOp(unary) => match unary.op {
+            UnaryOp::Not => {
+                let child = infer_predicate_expr(&unary.operand, context);
+                if child.judgment.ty != TypeExpr::Unit {
+                    panic!(
+                        "type error: predicate not expects 1, got {}",
+                        child.judgment.ty
+                    );
+                }
+                make_node(
+                    "PredNot",
+                    expr,
+                    context,
+                    TypeExpr::Unit,
+                    vec![child],
+                    ExprForm::UnaryOp(unary_op_label(unary.op)),
+                )
+            }
+            _ => panic!("unsupported unary operator in predicate: {:?}", unary.op),
+        },
+        Expr::BoolOp(bool_op) => {
+            let mut children = Vec::with_capacity(bool_op.values.len());
+            for value in &bool_op.values {
+                let child = infer_predicate_expr(value, context);
+                if child.judgment.ty != TypeExpr::Unit {
+                    panic!(
+                        "type error: predicate operator expects 1, got {}",
+                        child.judgment.ty
+                    );
+                }
+                children.push(child);
+            }
+            let label = match bool_op.op {
+                BoolOp::And => "and".to_string(),
+                BoolOp::Or => "or".to_string(),
+            };
+            make_node(
+                "PredBoolOp",
+                expr,
+                context,
+                TypeExpr::Unit,
+                children,
+                ExprForm::BoolOp(label),
+            )
+        }
+        Expr::Call(call) => infer_predicate_call(expr, call, context),
+        Expr::Constant(c) => match &c.value {
+            Constant::Bool(value) => make_leaf(
+                "PredConst",
+                expr,
+                context,
+                TypeExpr::Unit,
+                ExprForm::Const(predicate_const_label(*value)),
+            ),
+            _ => panic!("unsupported predicate literal: {:?}", c.value),
+        },
+        _ => panic!("unsupported predicate expression: {:?}", expr),
+    }
+}
+
+fn infer_predicate_call(expr: &Expr, call: &ExprCall, context: &Context) -> DeductionTree {
+    if !call.keywords.is_empty() {
+        panic!("keyword arguments are not supported");
+    }
+    if call.args.len() != 1 {
+        panic!("predicate calls are unary; got {} args", call.args.len());
+    }
+
+    let name = match call.func.as_ref() {
+        Expr::Name(ExprName { id, .. }) => id.as_str().to_string(),
+        _ => panic!("unsupported call target in predicate: {:?}", call.func),
+    };
+
+    let child = infer_expr(&call.args[0], context);
+    make_node(
+        "PredCall",
+        expr,
+        context,
+        TypeExpr::Unit,
+        vec![child],
+        ExprForm::Call(name),
+    )
 }
 
 fn infer_call(expr: &Expr, call: &ExprCall, context: &Context) -> DeductionTree {
@@ -409,6 +501,14 @@ fn const_label(c: &rustpython_parser::ast::ExprConstant) -> String {
     }
 }
 
+fn predicate_const_label(value: bool) -> String {
+    if value {
+        "Top".to_string()
+    } else {
+        "Bot".to_string()
+    }
+}
+
 fn unary_op_label(op: UnaryOp) -> String {
     match op {
         UnaryOp::UAdd => "pos".to_string(),
@@ -444,6 +544,7 @@ pub enum ExprForm {
 fn is_potential_bool(expr: &TypeExpr) -> bool {
     match expr {
         TypeExpr::Bool => true,
+        TypeExpr::Unit => false,
         TypeExpr::Var(_) => true,
         TypeExpr::Lub(left, right) => is_potential_bool(left) && is_potential_bool(right),
         TypeExpr::Int | TypeExpr::Float => false,
