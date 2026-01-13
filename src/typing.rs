@@ -275,6 +275,7 @@ fn builtin_fn(name: &str) -> Option<BuiltinFn> {
         "int" => Some(BuiltinFn::Fixed(TypeExpr::Int)),
         "float" => Some(BuiltinFn::Fixed(TypeExpr::Float)),
         "abs" => Some(BuiltinFn::SameAsArg),
+        "bit_length" => Some(BuiltinFn::Fixed(TypeExpr::Int)),
         _ => None,
     }
 }

@@ -1,5 +1,5 @@
 use open_hypergraphs::category::Arrow;
-use open_hypergraphs::lax::{NodeId, OpenHypergraph};
+use open_hypergraphs::lax::{Monoidal, NodeId, OpenHypergraph};
 
 use crate::types::TypeExpr;
 use crate::typing::{ContextSnapshot, DeductionTree, ExprForm};
@@ -110,7 +110,7 @@ fn unary_graph(op: &str, tree: &DeductionTree) -> OpenHypergraph<TypeExpr, Strin
     let target_type = vec![tree.judgment().ty().clone()];
     let op_graph = OpenHypergraph::singleton(op.to_string(), source_type, target_type);
 
-    compose_lax(&child_graph, &op_graph)
+    compose_lax_unchecked(&child_graph, &op_graph)
 }
 
 fn binop_graph(op: &str, tree: &DeductionTree) -> OpenHypergraph<TypeExpr, String> {
@@ -130,7 +130,7 @@ fn binop_graph(op: &str, tree: &DeductionTree) -> OpenHypergraph<TypeExpr, Strin
     let target_type = vec![tree.judgment().ty().clone()];
     let op_graph = OpenHypergraph::singleton(op.to_string(), source_type, target_type);
 
-    compose_lax(&tensor, &op_graph)
+    compose_lax_unchecked(&tensor, &op_graph)
 }
 
 fn call_graph(name: &str, tree: &DeductionTree) -> OpenHypergraph<TypeExpr, String> {
@@ -140,11 +140,12 @@ fn call_graph(name: &str, tree: &DeductionTree) -> OpenHypergraph<TypeExpr, Stri
     let child = &tree.children()[0];
     let child_graph = from_deduction_tree(child);
 
-    let source_type = vec![child.judgment().ty().clone()];
-    let target_type = vec![tree.judgment().ty().clone()];
+    let inferred_input = child.judgment().ty().clone();
+    let inferred_output = tree.judgment().ty().clone();
+    let (source_type, target_type) = call_signature(name, inferred_input, inferred_output);
     let op_graph = OpenHypergraph::singleton(name.to_string(), source_type, target_type);
 
-    compose_lax(&child_graph, &op_graph)
+    compose_lax_unchecked(&child_graph, &op_graph)
 }
 
 fn discard(entries: &[(String, TypeExpr)]) -> OpenHypergraph<TypeExpr, String> {
@@ -185,6 +186,42 @@ fn compose_lax(
             rhs.target()
         )
     })
+}
+
+fn compose_lax_unchecked(
+    lhs: &OpenHypergraph<TypeExpr, String>,
+    rhs: &OpenHypergraph<TypeExpr, String>,
+) -> OpenHypergraph<TypeExpr, String> {
+    if lhs.targets.len() != rhs.sources.len() {
+        panic!(
+            "unchecked composition requires same arity, got {} vs {}",
+            lhs.targets.len(),
+            rhs.sources.len()
+        );
+    }
+
+    let n = lhs.hypergraph.nodes.len();
+    let mut composed = lhs.tensor(rhs);
+
+    for (u, v) in lhs.targets.iter().zip(rhs.sources.iter()) {
+        composed.unify(*u, open_hypergraphs::lax::NodeId(v.0 + n));
+    }
+
+    composed.sources = composed.sources[..lhs.sources.len()].to_vec();
+    composed.targets = composed.targets[lhs.targets.len()..].to_vec();
+    composed
+}
+
+fn call_signature(
+    name: &str,
+    inferred_input: TypeExpr,
+    inferred_output: TypeExpr,
+) -> (Vec<TypeExpr>, Vec<TypeExpr>) {
+    match name {
+        "bit_length" => (vec![TypeExpr::Int], vec![TypeExpr::Int]),
+        "sqrt" => (vec![TypeExpr::Float], vec![TypeExpr::Float]),
+        _ => (vec![inferred_input], vec![inferred_output]),
+    }
 }
 
 fn format_nodes(nodes: &[NodeId]) -> String {
