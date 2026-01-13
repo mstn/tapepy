@@ -5,6 +5,7 @@ pub struct TypeVar(pub usize);
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum TypeExpr {
+    Bool,
     Int,
     Float,
     Var(TypeVar),
@@ -18,6 +19,7 @@ impl TypeExpr {
         }
 
         match (&left, &right) {
+            (TypeExpr::Bool, TypeExpr::Bool) => TypeExpr::Bool,
             (TypeExpr::Int, TypeExpr::Float) | (TypeExpr::Float, TypeExpr::Int) => TypeExpr::Float,
             (TypeExpr::Int, TypeExpr::Int) => TypeExpr::Int,
             (TypeExpr::Float, TypeExpr::Float) => TypeExpr::Float,
@@ -29,6 +31,7 @@ impl TypeExpr {
 impl fmt::Display for TypeExpr {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            TypeExpr::Bool => write!(f, "Bool"),
             TypeExpr::Int => write!(f, "Int"),
             TypeExpr::Float => write!(f, "Float"),
             TypeExpr::Var(TypeVar(id)) => write!(f, "a{}", id),

@@ -13,6 +13,7 @@ pub struct TypeSubstitution {
 impl TypeSubstitution {
     pub fn apply(&self, expr: &TypeExpr) -> TypeExpr {
         match expr {
+            TypeExpr::Bool => TypeExpr::Bool,
             TypeExpr::Int => TypeExpr::Int,
             TypeExpr::Float => TypeExpr::Float,
             TypeExpr::Var(var) => self
@@ -76,7 +77,7 @@ fn collect_vars(graph: &OpenHypergraph<TypeExpr, String>) -> HashSet<TypeVar> {
 
 fn collect_vars_expr(expr: &TypeExpr, vars: &mut HashSet<TypeVar>) {
     match expr {
-        TypeExpr::Int | TypeExpr::Float => {}
+        TypeExpr::Bool | TypeExpr::Int | TypeExpr::Float => {}
         TypeExpr::Var(var) => {
             vars.insert(var.clone());
         }
@@ -118,7 +119,7 @@ fn backtrack_solve(
     }
 
     let var = vars[idx].clone();
-    for choice in [TypeExpr::Int, TypeExpr::Float] {
+    for choice in [TypeExpr::Bool, TypeExpr::Int, TypeExpr::Float] {
         assignment.insert(var.clone(), choice.clone());
         if backtrack_solve(vars, idx + 1, assignment, constraints) {
             return true;
@@ -130,6 +131,7 @@ fn backtrack_solve(
 
 fn eval_expr(expr: &TypeExpr, assignment: &HashMap<TypeVar, TypeExpr>) -> TypeExpr {
     match expr {
+        TypeExpr::Bool => TypeExpr::Bool,
         TypeExpr::Int => TypeExpr::Int,
         TypeExpr::Float => TypeExpr::Float,
         TypeExpr::Var(var) => assignment

@@ -6,11 +6,15 @@ use crate::typing::{ContextSnapshot, DeductionTree, ExprForm};
 
 pub fn from_deduction_tree(tree: &DeductionTree) -> OpenHypergraph<TypeExpr, String> {
     match tree.form() {
-        ExprForm::Var(name) => var_graph(name, tree.judgment().context(), tree.judgment().ty()),
+        ExprForm::Var(name) => {
+            let ty = lookup_var_type(name, tree.judgment().context());
+            var_graph(&ty)
+        }
         ExprForm::Const(label) => constant_graph(label, tree.judgment().ty()),
         ExprForm::UnaryOp(op) => unary_graph(op, tree),
         ExprForm::BinOp(op) => binop_graph(op, tree),
         ExprForm::Call(name) => call_graph(name, tree),
+        ExprForm::BoolOp(op) => boolop_graph(op, tree),
     }
 }
 
@@ -78,22 +82,8 @@ pub fn format_hypergraph(graph: &OpenHypergraph<TypeExpr, String>) -> String {
     out
 }
 
-fn var_graph(
-    name: &str,
-    context: &ContextSnapshot,
-    ty: &TypeExpr,
-) -> OpenHypergraph<TypeExpr, String> {
-    let entries = context.entries();
-    let index = entries
-        .iter()
-        .position(|(var, _)| var == name)
-        .unwrap_or_else(|| panic!("variable `{}` not found in context", name));
-
-    let left = discard(&entries[..index]);
-    let id = OpenHypergraph::identity(vec![ty.clone()]);
-    let right = discard(&entries[index + 1..]);
-
-    tensor_many(vec![left, id, right])
+fn var_graph(ty: &TypeExpr) -> OpenHypergraph<TypeExpr, String> {
+    OpenHypergraph::identity(vec![ty.clone()])
 }
 
 fn constant_graph(label: &str, ty: &TypeExpr) -> OpenHypergraph<TypeExpr, String> {
@@ -148,15 +138,26 @@ fn call_graph(name: &str, tree: &DeductionTree) -> OpenHypergraph<TypeExpr, Stri
     compose_lax_unchecked(&child_graph, &op_graph)
 }
 
-fn discard(entries: &[(String, TypeExpr)]) -> OpenHypergraph<TypeExpr, String> {
-    let mut graph = OpenHypergraph::empty();
-    let sources = entries
+fn boolop_graph(op: &str, tree: &DeductionTree) -> OpenHypergraph<TypeExpr, String> {
+    if tree.children().is_empty() {
+        panic!("boolean operation expects at least 1 operand");
+    }
+
+    let mut graphs = Vec::with_capacity(tree.children().len());
+    for child in tree.children() {
+        graphs.push(from_deduction_tree(child));
+    }
+    let tensor = tensor_many(graphs);
+
+    let source_type = tree
+        .children()
         .iter()
-        .map(|(_, ty)| graph.new_node(ty.clone()))
+        .map(|child| child.judgment().ty().clone())
         .collect();
-    graph.sources = sources;
-    graph.targets = Vec::new();
-    graph
+    let target_type = vec![tree.judgment().ty().clone()];
+    let op_graph = OpenHypergraph::singleton(op.to_string(), source_type, target_type);
+
+    compose_lax_unchecked(&tensor, &op_graph)
 }
 
 fn tensor_many(
@@ -210,6 +211,15 @@ fn compose_lax_unchecked(
     composed.sources = composed.sources[..lhs.sources.len()].to_vec();
     composed.targets = composed.targets[lhs.targets.len()..].to_vec();
     composed
+}
+
+fn lookup_var_type(name: &str, context: &ContextSnapshot) -> TypeExpr {
+    context
+        .entries()
+        .iter()
+        .find(|(var, _)| var == name)
+        .map(|(_, ty)| ty.clone())
+        .unwrap_or_else(|| panic!("variable `{}` not found in context", name))
 }
 
 fn call_signature(

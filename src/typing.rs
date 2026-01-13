@@ -1,6 +1,6 @@
 use std::fmt;
 
-use rustpython_parser::ast::{Constant, Expr, ExprCall, ExprName, Operator, UnaryOp};
+use rustpython_parser::ast::{BoolOp, Constant, Expr, ExprCall, ExprName, Operator, UnaryOp};
 
 use crate::context::Context;
 use crate::types::TypeExpr;
@@ -104,6 +104,7 @@ fn infer_expr(expr: &Expr, context: &Context) -> DeductionTree {
         }
         Expr::Constant(c) => {
             let ty = match &c.value {
+                Constant::Bool(_) => TypeExpr::Bool,
                 Constant::Int(_) => TypeExpr::Int,
                 Constant::Float(_) => TypeExpr::Float,
                 _ => panic!("unsupported literal in expression: {:?}", c.value),
@@ -120,6 +121,18 @@ fn infer_expr(expr: &Expr, context: &Context) -> DeductionTree {
             UnaryOp::UAdd | UnaryOp::USub => {
                 let child = infer_expr(&unary.operand, context);
                 let ty = child.judgment.ty.clone();
+                make_node(
+                    "UnaryOp",
+                    expr,
+                    context,
+                    ty,
+                    vec![child],
+                    ExprForm::UnaryOp(unary_op_label(unary.op)),
+                )
+            }
+            UnaryOp::Not => {
+                let child = infer_expr(&unary.operand, context);
+                let ty = TypeExpr::Bool;
                 make_node(
                     "UnaryOp",
                     expr,
@@ -148,6 +161,24 @@ fn infer_expr(expr: &Expr, context: &Context) -> DeductionTree {
             )
         }
         Expr::Call(call) => infer_call(expr, call, context),
+        Expr::BoolOp(bool_op) => {
+            let mut children = Vec::with_capacity(bool_op.values.len());
+            for value in &bool_op.values {
+                children.push(infer_expr(value, context));
+            }
+            let label = match bool_op.op {
+                BoolOp::And => "and".to_string(),
+                BoolOp::Or => "or".to_string(),
+            };
+            make_node(
+                "BoolOp",
+                expr,
+                context,
+                TypeExpr::Bool,
+                children,
+                ExprForm::BoolOp(label),
+            )
+        }
         _ => panic!("unsupported Python expression: {:?}", expr),
     }
 }
@@ -193,6 +224,11 @@ fn collect_free_vars(expr: &Expr, context: &mut Context) {
         Expr::BinOp(bin) => {
             collect_free_vars(&bin.left, context);
             collect_free_vars(&bin.right, context);
+        }
+        Expr::BoolOp(bool_op) => {
+            for value in &bool_op.values {
+                collect_free_vars(value, context);
+            }
         }
         Expr::Call(call) => {
             if !call.keywords.is_empty() {
@@ -272,6 +308,7 @@ enum BuiltinFn {
 
 fn builtin_fn(name: &str) -> Option<BuiltinFn> {
     match name {
+        "bool" => Some(BuiltinFn::Fixed(TypeExpr::Bool)),
         "int" => Some(BuiltinFn::Fixed(TypeExpr::Int)),
         "float" => Some(BuiltinFn::Fixed(TypeExpr::Float)),
         "abs" => Some(BuiltinFn::SameAsArg),
@@ -284,6 +321,7 @@ fn expr_to_string(expr: &Expr) -> String {
     match expr {
         Expr::Name(ExprName { id, .. }) => id.to_string(),
         Expr::Constant(c) => match &c.value {
+            Constant::Bool(value) => value.to_string(),
             Constant::Int(value) => value.to_string(),
             Constant::Float(value) => value.to_string(),
             _ => format!("{:?}", expr),
@@ -292,6 +330,7 @@ fn expr_to_string(expr: &Expr) -> String {
             let op = match unary.op {
                 UnaryOp::UAdd => "+",
                 UnaryOp::USub => "-",
+                UnaryOp::Not => "not ",
                 _ => "?",
             };
             format!("{}{}", op, expr_to_string(&unary.operand))
@@ -325,12 +364,32 @@ fn expr_to_string(expr: &Expr) -> String {
                 format!("{}(...)", name)
             }
         }
+        Expr::BoolOp(bool_op) => {
+            let op = match bool_op.op {
+                BoolOp::And => "and",
+                BoolOp::Or => "or",
+            };
+            let mut parts = bool_op
+                .values
+                .iter()
+                .map(expr_to_string)
+                .collect::<Vec<_>>();
+            if parts.is_empty() {
+                return "(<empty boolop>)".to_string();
+            }
+            let mut expr = parts.remove(0);
+            for part in parts {
+                expr = format!("({} {} {})", expr, op, part);
+            }
+            expr
+        }
         _ => format!("{:?}", expr),
     }
 }
 
 fn const_label(c: &rustpython_parser::ast::ExprConstant) -> String {
     match &c.value {
+        Constant::Bool(value) => value.to_string(),
         Constant::Int(value) => value.to_string(),
         Constant::Float(value) => value.to_string(),
         _ => format!("{:?}", c.value),
@@ -341,6 +400,7 @@ fn unary_op_label(op: UnaryOp) -> String {
     match op {
         UnaryOp::UAdd => "pos".to_string(),
         UnaryOp::USub => "neg".to_string(),
+        UnaryOp::Not => "not".to_string(),
         _ => "unary".to_string(),
     }
 }
@@ -365,6 +425,7 @@ pub enum ExprForm {
     UnaryOp(String),
     BinOp(String),
     Call(String),
+    BoolOp(String),
 }
 
 impl Judgment {
