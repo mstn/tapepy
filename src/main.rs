@@ -1,5 +1,6 @@
 mod context;
 mod hypergraph;
+mod solver;
 mod types;
 mod typing;
 
@@ -7,7 +8,9 @@ use std::error::Error;
 
 use graphviz_rust::printer::{DotPrinter, PrinterContext};
 use open_hypergraphs_dot::{generate_dot_with, svg::to_svg_with, Options};
+use open_hypergraphs::lax::OpenHypergraph;
 use rustpython_parser::{ast, Parse};
+use solver::{apply_substitution, solve_hypergraph_types};
 use typing::infer_expression;
 
 fn main() -> Result<(), Box<dyn Error>> {
@@ -26,24 +29,48 @@ fn main() -> Result<(), Box<dyn Error>> {
     let term = hypergraph::from_deduction_tree(&tree);
     println!("{}", tree);
     println!("{}", hypergraph::format_hypergraph(&term));
+
     let opts = Options {
         node_label: Box::new(|t: &types::TypeExpr| t.to_string()),
         edge_label: Box::new(|s: &String| s.clone()),
         ..Options::default()
     };
 
-    match to_svg_with(&term, &opts) {
-        Ok(svg) => {
-            std::fs::write("./out.svg", svg)?;
+    write_svg_with_fallback("./out", &term, &opts)?;
+
+    match solve_hypergraph_types(&term) {
+        Ok(subst) => {
+            let substituted = apply_substitution(&term, &subst);
+            let strict = substituted.to_strict();
+            let strict_lax = OpenHypergraph::from_strict(strict);
+            write_svg_with_fallback("./out_strict", &strict_lax, &opts)?;
         }
         Err(err) => {
-            let dot_graph = generate_dot_with(&term, &opts);
+            eprintln!("Type solving failed: {}", err);
+        }
+    }
+    Ok(())
+}
+
+fn write_svg_with_fallback(
+    prefix: &str,
+    graph: &OpenHypergraph<types::TypeExpr, String>,
+    opts: &Options<types::TypeExpr, String>,
+) -> Result<(), Box<dyn Error>> {
+    let svg_path = format!("{}.svg", prefix);
+    let dot_path = format!("{}.dot", prefix);
+    match to_svg_with(graph, opts) {
+        Ok(svg) => {
+            std::fs::write(svg_path, svg)?;
+        }
+        Err(err) => {
+            let dot_graph = generate_dot_with(graph, opts);
             let mut ctx = PrinterContext::default();
             let dot_string = dot_graph.print(&mut ctx);
-            std::fs::write("./out.dot", dot_string)?;
+            std::fs::write(dot_path, dot_string)?;
             eprintln!(
-                "SVG rendering failed ({}). Wrote DOT output to out.dot.",
-                err
+                "SVG rendering failed ({}). Wrote DOT output to {}.dot.",
+                err, prefix
             );
         }
     }
