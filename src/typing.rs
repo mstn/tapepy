@@ -132,6 +132,12 @@ fn infer_expr(expr: &Expr, context: &Context) -> DeductionTree {
             }
             UnaryOp::Not => {
                 let child = infer_expr(&unary.operand, context);
+                if !is_potential_bool(&child.judgment.ty) {
+                    panic!(
+                        "type error: not expects Bool, got {}",
+                        child.judgment.ty
+                    );
+                }
                 let ty = TypeExpr::Bool;
                 make_node(
                     "UnaryOp",
@@ -164,7 +170,14 @@ fn infer_expr(expr: &Expr, context: &Context) -> DeductionTree {
         Expr::BoolOp(bool_op) => {
             let mut children = Vec::with_capacity(bool_op.values.len());
             for value in &bool_op.values {
-                children.push(infer_expr(value, context));
+                let child = infer_expr(value, context);
+                if !is_potential_bool(&child.judgment.ty) {
+                    panic!(
+                        "type error: boolean operator expects Bool, got {}",
+                        child.judgment.ty
+                    );
+                }
+                children.push(child);
             }
             let label = match bool_op.op {
                 BoolOp::And => "and".to_string(),
@@ -426,6 +439,15 @@ pub enum ExprForm {
     BinOp(String),
     Call(String),
     BoolOp(String),
+}
+
+fn is_potential_bool(expr: &TypeExpr) -> bool {
+    match expr {
+        TypeExpr::Bool => true,
+        TypeExpr::Var(_) => true,
+        TypeExpr::Lub(left, right) => is_potential_bool(left) && is_potential_bool(right),
+        TypeExpr::Int | TypeExpr::Float => false,
+    }
 }
 
 impl Judgment {
