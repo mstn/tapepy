@@ -87,6 +87,14 @@ pub fn infer_expression(expr: &Expr) -> DeductionTree {
     infer_expr(expr, &context)
 }
 
+pub fn infer_expression_in_context(expr: &Expr, context: &Context) -> DeductionTree {
+    infer_expr(expr, context)
+}
+
+pub fn infer_predicate_in_context(expr: &Expr, context: &Context) -> DeductionTree {
+    infer_predicate_expr(expr, context)
+}
+
 pub fn infer_predicate(expr: &Expr) -> DeductionTree {
     let mut context = Context::default();
     collect_free_vars(expr, &mut context);

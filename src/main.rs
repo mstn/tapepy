@@ -1,5 +1,6 @@
 mod context;
 mod hypergraph;
+mod command_typing;
 mod solver;
 mod types;
 mod typing;
