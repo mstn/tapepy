@@ -26,12 +26,18 @@ fn main() -> Result<(), Box<dyn Error>> {
     let term = hypergraph::from_deduction_tree(&tree);
     println!("{}", tree);
     println!("{}", hypergraph::format_hypergraph(&term));
-    match to_svg_with(&term, &Options::default()) {
+    let opts = Options {
+        node_label: Box::new(|t: &types::TypeExpr| t.to_string()),
+        edge_label: Box::new(|s: &String| s.clone()),
+        ..Options::default()
+    };
+
+    match to_svg_with(&term, &opts) {
         Ok(svg) => {
             std::fs::write("./out.svg", svg)?;
         }
         Err(err) => {
-            let dot_graph = generate_dot_with(&term, &Options::default());
+            let dot_graph = generate_dot_with(&term, &opts);
             let mut ctx = PrinterContext::default();
             let dot_string = dot_graph.print(&mut ctx);
             std::fs::write("./out.dot", dot_string)?;

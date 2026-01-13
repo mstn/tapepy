@@ -66,7 +66,12 @@ pub fn format_hypergraph(graph: &OpenHypergraph<TypeExpr, String>) -> String {
             .iter()
             .zip(graph.hypergraph.quotient.1.iter())
         {
-            out.push_str(&format!("    n{} ~ n{}\n", from.0, to.0));
+            let from_label = &graph.hypergraph.nodes[from.0];
+            let to_label = &graph.hypergraph.nodes[to.0];
+            out.push_str(&format!(
+                "    n{}:{} ~ n{}:{}\n",
+                from.0, from_label, to.0, to_label
+            ));
         }
     }
 
