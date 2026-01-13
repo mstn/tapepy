@@ -1,35 +1,35 @@
-use std::collections::BTreeMap;
 use std::fmt;
 
 use rustpython_parser::ast::{Constant, Expr, ExprCall, ExprName, Operator, UnaryOp};
 
-use crate::context::Gamma;
+use crate::context::Context;
 use crate::types::TypeExpr;
 
 #[derive(Debug, Clone)]
 pub struct Judgment {
-    gamma: GammaSnapshot,
+    context: ContextSnapshot,
     expr: String,
     ty: TypeExpr,
 }
 
 #[derive(Debug, Clone)]
-struct GammaSnapshot(BTreeMap<String, TypeExpr>);
+pub struct ContextSnapshot(Vec<(String, TypeExpr)>);
 
 #[derive(Debug, Clone)]
 pub struct DeductionTree {
     rule: &'static str,
     judgment: Judgment,
     children: Vec<DeductionTree>,
+    form: ExprForm,
 }
 
-impl fmt::Display for GammaSnapshot {
+impl fmt::Display for ContextSnapshot {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         if self.0.is_empty() {
-            return write!(f, "Γ");
+            return write!(f, "Context");
         }
 
-        write!(f, "Γ[")?;
+        write!(f, "Context[")?;
         for (idx, (name, ty)) in self.0.iter().enumerate() {
             if idx > 0 {
                 write!(f, ", ")?;
@@ -42,7 +42,7 @@ impl fmt::Display for GammaSnapshot {
 
 impl fmt::Display for Judgment {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{} |- {} : {}", self.gamma, self.expr, self.ty)
+        write!(f, "{} |- {} : {}", self.context, self.expr, self.ty)
     }
 }
 
@@ -53,6 +53,22 @@ impl fmt::Display for DeductionTree {
 }
 
 impl DeductionTree {
+    pub fn judgment(&self) -> &Judgment {
+        &self.judgment
+    }
+
+    pub fn children(&self) -> &[DeductionTree] {
+        &self.children
+    }
+
+    pub fn rule(&self) -> &'static str {
+        self.rule
+    }
+
+    pub fn form(&self) -> &ExprForm {
+        &self.form
+    }
+
     fn fmt_with_indent(&self, f: &mut fmt::Formatter<'_>, indent: usize) -> fmt::Result {
         for _ in 0..indent {
             write!(f, "  ")?;
@@ -66,19 +82,25 @@ impl DeductionTree {
 }
 
 pub fn infer_expression(expr: &Expr) -> DeductionTree {
-    let mut gamma = Gamma::default();
-    collect_free_vars(expr, &mut gamma);
-    infer_expr(expr, &gamma)
+    let mut context = Context::default();
+    collect_free_vars(expr, &mut context);
+    infer_expr(expr, &context)
 }
 
-fn infer_expr(expr: &Expr, gamma: &Gamma) -> DeductionTree {
+fn infer_expr(expr: &Expr, context: &Context) -> DeductionTree {
     match expr {
         Expr::Name(ExprName { id, .. }) => {
-            let ty = gamma
+            let ty = context
                 .get(id.as_str())
                 .cloned()
                 .unwrap_or_else(|| panic!("missing type variable for `{}`", id));
-            make_leaf("Var", expr, gamma, ty)
+            make_leaf(
+                "Var",
+                expr,
+                context,
+                ty,
+                ExprForm::Var(id.to_string()),
+            )
         }
         Expr::Constant(c) => {
             let ty = match &c.value {
@@ -86,13 +108,26 @@ fn infer_expr(expr: &Expr, gamma: &Gamma) -> DeductionTree {
                 Constant::Float(_) => TypeExpr::Float,
                 _ => panic!("unsupported literal in expression: {:?}", c.value),
             };
-            make_leaf("Const", expr, gamma, ty)
+            make_leaf(
+                "Const",
+                expr,
+                context,
+                ty,
+                ExprForm::Const(const_label(c)),
+            )
         }
         Expr::UnaryOp(unary) => match unary.op {
             UnaryOp::UAdd | UnaryOp::USub => {
-                let child = infer_expr(&unary.operand, gamma);
+                let child = infer_expr(&unary.operand, context);
                 let ty = child.judgment.ty.clone();
-                make_node("UnaryOp", expr, gamma, ty, vec![child])
+                make_node(
+                    "UnaryOp",
+                    expr,
+                    context,
+                    ty,
+                    vec![child],
+                    ExprForm::UnaryOp(unary_op_label(unary.op)),
+                )
             }
             _ => panic!("unsupported unary operator in expression: {:?}", unary.op),
         },
@@ -100,17 +135,24 @@ fn infer_expr(expr: &Expr, gamma: &Gamma) -> DeductionTree {
             if !is_numeric_binop(&bin.op) {
                 panic!("unsupported binary operator in expression: {:?}", bin.op);
             }
-            let left = infer_expr(&bin.left, gamma);
-            let right = infer_expr(&bin.right, gamma);
+            let left = infer_expr(&bin.left, context);
+            let right = infer_expr(&bin.right, context);
             let ty = TypeExpr::lub(left.judgment.ty.clone(), right.judgment.ty.clone());
-            make_node("BinOp", expr, gamma, ty, vec![left, right])
+            make_node(
+                "BinOp",
+                expr,
+                context,
+                ty,
+                vec![left, right],
+                ExprForm::BinOp(binop_label(&bin.op)),
+            )
         }
-        Expr::Call(call) => infer_call(expr, call, gamma),
+        Expr::Call(call) => infer_call(expr, call, context),
         _ => panic!("unsupported Python expression: {:?}", expr),
     }
 }
 
-fn infer_call(expr: &Expr, call: &ExprCall, gamma: &Gamma) -> DeductionTree {
+fn infer_call(expr: &Expr, call: &ExprCall, context: &Context) -> DeductionTree {
     if !call.keywords.is_empty() {
         panic!("keyword arguments are not supported");
     }
@@ -126,24 +168,31 @@ fn infer_call(expr: &Expr, call: &ExprCall, gamma: &Gamma) -> DeductionTree {
     };
 
     let builtin = builtin_fn(&name).unwrap_or_else(|| panic!("unsupported function `{}`", name));
-    let child = infer_expr(arg, gamma);
+    let child = infer_expr(arg, context);
     let ty = match builtin {
         BuiltinFn::Fixed(fixed) => fixed,
         BuiltinFn::SameAsArg => child.judgment.ty.clone(),
     };
 
-    make_node("Call", expr, gamma, ty, vec![child])
+    make_node(
+        "Call",
+        expr,
+        context,
+        ty,
+        vec![child],
+        ExprForm::Call(name),
+    )
 }
 
-fn collect_free_vars(expr: &Expr, gamma: &mut Gamma) {
+fn collect_free_vars(expr: &Expr, context: &mut Context) {
     match expr {
         Expr::Name(ExprName { id, .. }) => {
-            gamma.get_or_insert_var(id.as_str());
+            context.get_or_insert_var(id.as_str());
         }
-        Expr::UnaryOp(unary) => collect_free_vars(&unary.operand, gamma),
+        Expr::UnaryOp(unary) => collect_free_vars(&unary.operand, context),
         Expr::BinOp(bin) => {
-            collect_free_vars(&bin.left, gamma);
-            collect_free_vars(&bin.right, gamma);
+            collect_free_vars(&bin.left, context);
+            collect_free_vars(&bin.right, context);
         }
         Expr::Call(call) => {
             if !call.keywords.is_empty() {
@@ -157,40 +206,49 @@ fn collect_free_vars(expr: &Expr, gamma: &mut Gamma) {
                 }
                 _ => panic!("unsupported call target in expression: {:?}", call.func),
             }
-            collect_free_vars(&call.args[0], gamma);
+            collect_free_vars(&call.args[0], context);
         }
         Expr::Constant(_) => {}
         _ => panic!("unsupported Python expression: {:?}", expr),
     }
 }
 
-fn make_leaf(rule: &'static str, expr: &Expr, gamma: &Gamma, ty: TypeExpr) -> DeductionTree {
+fn make_leaf(
+    rule: &'static str,
+    expr: &Expr,
+    context: &Context,
+    ty: TypeExpr,
+    form: ExprForm,
+) -> DeductionTree {
     DeductionTree {
         rule,
         judgment: Judgment {
-            gamma: GammaSnapshot(gamma.snapshot()),
+            context: ContextSnapshot(context.entries()),
             expr: expr_to_string(expr),
             ty,
         },
         children: Vec::new(),
+        form,
     }
 }
 
 fn make_node(
     rule: &'static str,
     expr: &Expr,
-    gamma: &Gamma,
+    context: &Context,
     ty: TypeExpr,
     children: Vec<DeductionTree>,
+    form: ExprForm,
 ) -> DeductionTree {
     DeductionTree {
         rule,
         judgment: Judgment {
-            gamma: GammaSnapshot(gamma.snapshot()),
+            context: ContextSnapshot(context.entries()),
             expr: expr_to_string(expr),
             ty,
         },
         children,
+        form,
     }
 }
 
@@ -267,5 +325,63 @@ fn expr_to_string(expr: &Expr) -> String {
             }
         }
         _ => format!("{:?}", expr),
+    }
+}
+
+fn const_label(c: &rustpython_parser::ast::ExprConstant) -> String {
+    match &c.value {
+        Constant::Int(value) => value.to_string(),
+        Constant::Float(value) => value.to_string(),
+        _ => format!("{:?}", c.value),
+    }
+}
+
+fn unary_op_label(op: UnaryOp) -> String {
+    match op {
+        UnaryOp::UAdd => "pos".to_string(),
+        UnaryOp::USub => "neg".to_string(),
+        _ => "unary".to_string(),
+    }
+}
+
+fn binop_label(op: &Operator) -> String {
+    match op {
+        Operator::Add => "+".to_string(),
+        Operator::Sub => "-".to_string(),
+        Operator::Mult => "*".to_string(),
+        Operator::Div => "/".to_string(),
+        Operator::Mod => "%".to_string(),
+        Operator::Pow => "**".to_string(),
+        Operator::FloorDiv => "//".to_string(),
+        _ => "?".to_string(),
+    }
+}
+
+#[derive(Debug, Clone)]
+pub enum ExprForm {
+    Var(String),
+    Const(String),
+    UnaryOp(String),
+    BinOp(String),
+    Call(String),
+}
+
+impl Judgment {
+    pub fn context(&self) -> &ContextSnapshot {
+        &self.context
+    }
+
+    pub fn ty(&self) -> &TypeExpr {
+        &self.ty
+    }
+
+    pub fn expr(&self) -> &str {
+        &self.expr
+    }
+}
+
+impl ContextSnapshot {
+    pub fn entries(&self) -> &[(String, TypeExpr)] {
+        &self.0
     }
 }

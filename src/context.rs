@@ -3,12 +3,12 @@ use std::collections::BTreeMap;
 use crate::types::{TypeExpr, TypeVar};
 
 #[derive(Debug, Clone, Default)]
-pub struct Gamma {
+pub struct Context {
     vars: BTreeMap<String, TypeExpr>,
     next_var: usize,
 }
 
-impl Gamma {
+impl Context {
     pub fn get_or_insert_var(&mut self, name: &str) -> TypeExpr {
         if let Some(ty) = self.vars.get(name) {
             return ty.clone();
@@ -26,5 +26,12 @@ impl Gamma {
 
     pub fn snapshot(&self) -> BTreeMap<String, TypeExpr> {
         self.vars.clone()
+    }
+
+    pub fn entries(&self) -> Vec<(String, TypeExpr)> {
+        self.vars
+            .iter()
+            .map(|(name, ty)| (name.clone(), ty.clone()))
+            .collect()
     }
 }
