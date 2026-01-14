@@ -24,6 +24,10 @@ impl Context {
         self.vars.get(name)
     }
 
+    pub fn set_var(&mut self, name: &str, ty: TypeExpr) {
+        self.vars.insert(name.to_string(), ty);
+    }
+
     pub fn snapshot(&self) -> BTreeMap<String, TypeExpr> {
         self.vars.clone()
     }

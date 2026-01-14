@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use open_hypergraphs::category::Arrow;
 use open_hypergraphs::lax::{Monoidal, NodeId, OpenHypergraph};
 
@@ -16,6 +18,16 @@ pub fn from_deduction_tree(tree: &DeductionTree) -> OpenHypergraph<TypeExpr, Str
         ExprForm::Call(name) => call_graph(name, tree),
         ExprForm::BoolOp(op) => boolop_graph(op, tree),
     }
+}
+
+pub fn from_deduction_tree_with_context(
+    tree: &DeductionTree,
+    context_entries: &[(String, TypeExpr)],
+) -> OpenHypergraph<TypeExpr, String> {
+    let input_vars = expr_input_vars(tree);
+    let wiring = wiring_for_expression(context_entries, &input_vars);
+    let expr_graph = from_deduction_tree(tree);
+    compose_lax_unchecked(&wiring, &expr_graph)
 }
 
 pub fn format_hypergraph(graph: &OpenHypergraph<TypeExpr, String>) -> String {
@@ -158,6 +170,60 @@ fn boolop_graph(op: &str, tree: &DeductionTree) -> OpenHypergraph<TypeExpr, Stri
     let op_graph = OpenHypergraph::singleton(op.to_string(), source_type, target_type);
 
     compose_lax_unchecked(&tensor, &op_graph)
+}
+
+fn expr_input_vars(tree: &DeductionTree) -> Vec<String> {
+    match tree.form() {
+        ExprForm::Var(name) => vec![name.clone()],
+        ExprForm::Const(_) => Vec::new(),
+        ExprForm::UnaryOp(_) | ExprForm::Call(_) => tree
+            .children()
+            .get(0)
+            .map(expr_input_vars)
+            .unwrap_or_default(),
+        ExprForm::BinOp(_) => {
+            if tree.children().len() != 2 {
+                return Vec::new();
+            }
+            let mut left = expr_input_vars(&tree.children()[0]);
+            let mut right = expr_input_vars(&tree.children()[1]);
+            left.append(&mut right);
+            left
+        }
+        ExprForm::BoolOp(_) => {
+            let mut vars = Vec::new();
+            for child in tree.children() {
+                vars.extend(expr_input_vars(child));
+            }
+            vars
+        }
+    }
+}
+
+fn wiring_for_expression(
+    context_entries: &[(String, TypeExpr)],
+    input_vars: &[String],
+) -> OpenHypergraph<TypeExpr, String> {
+    let mut graph = OpenHypergraph::empty();
+    let mut input_nodes = Vec::with_capacity(context_entries.len());
+    let mut type_map = HashMap::new();
+    for (name, ty) in context_entries {
+        input_nodes.push(graph.new_node(ty.clone()));
+        type_map.insert(name.clone(), ty.clone());
+    }
+    graph.sources = input_nodes.clone();
+
+    let mut outputs = Vec::with_capacity(input_vars.len());
+    for name in input_vars {
+        let index = context_entries
+            .iter()
+            .position(|(var, _)| var == name)
+            .unwrap_or_else(|| panic!("variable `{}` not in context", name));
+        outputs.push(input_nodes[index]);
+    }
+    graph.targets = outputs;
+
+    graph
 }
 
 fn tensor_many(

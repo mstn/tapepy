@@ -15,6 +15,12 @@ pub struct Judgment {
 #[derive(Debug, Clone)]
 pub struct ContextSnapshot(Vec<(String, TypeExpr)>);
 
+impl ContextSnapshot {
+    pub fn new(entries: Vec<(String, TypeExpr)>) -> Self {
+        Self(entries)
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct DeductionTree {
     rule: &'static str,
@@ -108,13 +114,7 @@ fn infer_expr(expr: &Expr, context: &Context) -> DeductionTree {
                 .get(id.as_str())
                 .cloned()
                 .unwrap_or_else(|| panic!("missing type variable for `{}`", id));
-            make_leaf(
-                "Var",
-                expr,
-                context,
-                ty,
-                ExprForm::Var(id.to_string()),
-            )
+            make_leaf("Var", expr, context, ty, ExprForm::Var(id.to_string()))
         }
         Expr::Constant(c) => {
             let ty = match &c.value {
@@ -123,13 +123,7 @@ fn infer_expr(expr: &Expr, context: &Context) -> DeductionTree {
                 Constant::Float(_) => TypeExpr::Float,
                 _ => panic!("unsupported literal in expression: {:?}", c.value),
             };
-            make_leaf(
-                "Const",
-                expr,
-                context,
-                ty,
-                ExprForm::Const(const_label(c)),
-            )
+            make_leaf("Const", expr, context, ty, ExprForm::Const(const_label(c)))
         }
         Expr::UnaryOp(unary) => match unary.op {
             UnaryOp::UAdd | UnaryOp::USub => {
@@ -147,10 +141,7 @@ fn infer_expr(expr: &Expr, context: &Context) -> DeductionTree {
             UnaryOp::Not => {
                 let child = infer_expr(&unary.operand, context);
                 if !is_potential_bool(&child.judgment.ty) {
-                    panic!(
-                        "type error: not expects Bool, got {}",
-                        child.judgment.ty
-                    );
+                    panic!("type error: not expects Bool, got {}", child.judgment.ty);
                 }
                 let ty = TypeExpr::Bool;
                 make_node(
@@ -318,14 +309,7 @@ fn infer_call(expr: &Expr, call: &ExprCall, context: &Context) -> DeductionTree 
         BuiltinFn::SameAsArg => child.judgment.ty.clone(),
     };
 
-    make_node(
-        "Call",
-        expr,
-        context,
-        ty,
-        vec![child],
-        ExprForm::Call(name),
-    )
+    make_node("Call", expr, context, ty, vec![child], ExprForm::Call(name))
 }
 
 fn collect_free_vars(expr: &Expr, context: &mut Context) {

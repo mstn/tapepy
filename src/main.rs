@@ -1,4 +1,5 @@
 mod context;
+mod command_hypergraph;
 mod hypergraph;
 mod command_typing;
 mod solver;
@@ -11,23 +12,23 @@ use graphviz_rust::printer::{DotPrinter, PrinterContext};
 use open_hypergraphs_dot::{generate_dot_with, svg::to_svg_with, Options};
 use open_hypergraphs::lax::OpenHypergraph;
 use rustpython_parser::{ast, Parse};
+use command_typing::infer_command_from_suite;
 use solver::{apply_substitution, solve_hypergraph_types};
-use typing::infer_expression;
 
 fn main() -> Result<(), Box<dyn Error>> {
     let input = std::env::args().skip(1).collect::<Vec<_>>().join(" ");
-    let source = if input.is_empty() { "x + 1.0" } else { &input };
+    let source = if input.is_empty() { "x = 1\ny = x" } else { &input };
 
-    let expr = match ast::Expr::parse(source, "<input>") {
-        Ok(expr) => expr,
+    let suite = match ast::Suite::parse(source, "<input>") {
+        Ok(suite) => suite,
         Err(err) => {
             eprintln!("Parse error: {}", err);
             return Ok(());
         }
     };
 
-    let tree = infer_expression(&expr);
-    let term = hypergraph::from_deduction_tree(&tree);
+    let tree = infer_command_from_suite(&suite);
+    let term = command_hypergraph::from_command_tree(&tree);
     println!("{}", tree);
     println!("{}", hypergraph::format_hypergraph(&term));
 
