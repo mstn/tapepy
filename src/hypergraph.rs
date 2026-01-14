@@ -17,6 +17,7 @@ pub fn from_deduction_tree(tree: &DeductionTree) -> OpenHypergraph<TypeExpr, Str
         ExprForm::BinOp(op) => binop_graph(op, tree),
         ExprForm::Call(name) => call_graph(name, tree),
         ExprForm::BoolOp(op) => boolop_graph(op, tree),
+        ExprForm::Compare(op) => compare_graph(op, tree),
     }
 }
 
@@ -174,6 +175,24 @@ fn boolop_graph(op: &str, tree: &DeductionTree) -> OpenHypergraph<TypeExpr, Stri
     compose_lax_unchecked(&tensor, &op_graph)
 }
 
+fn compare_graph(op: &str, tree: &DeductionTree) -> OpenHypergraph<TypeExpr, String> {
+    if tree.children().len() != 2 {
+        panic!("comparison expects 2 operands");
+    }
+    let left = from_deduction_tree(&tree.children()[0]);
+    let right = from_deduction_tree(&tree.children()[1]);
+    let tensor = tensor_many(vec![left, right]);
+
+    let source_type = tree
+        .children()
+        .iter()
+        .map(|child| child.judgment().ty().clone())
+        .collect();
+    let target_type = vec![tree.judgment().ty().clone()];
+    let op_graph = OpenHypergraph::singleton(op.to_string(), source_type, target_type);
+
+    compose_lax_unchecked(&tensor, &op_graph)
+}
 fn expr_input_vars(tree: &DeductionTree) -> Vec<String> {
     match tree.form() {
         ExprForm::Var(name) => vec![name.clone()],
@@ -183,7 +202,7 @@ fn expr_input_vars(tree: &DeductionTree) -> Vec<String> {
             .get(0)
             .map(expr_input_vars)
             .unwrap_or_default(),
-        ExprForm::BinOp(_) => {
+        ExprForm::BinOp(_) | ExprForm::Compare(_) => {
             if tree.children().len() != 2 {
                 return Vec::new();
             }

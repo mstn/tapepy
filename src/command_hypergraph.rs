@@ -12,8 +12,9 @@ pub fn from_command_tree(tree: &CommandDerivationTree) -> OpenHypergraph<TypeExp
         CommandForm::Skip => identity_context(tree),
         CommandForm::Assign(name) => assignment_graph(tree, name),
         CommandForm::Seq => sequence_graph(tree),
-        CommandForm::If | CommandForm::While => {
-            panic!("if/while hypergraphs not implemented yet")
+        CommandForm::If => if_graph(tree),
+        CommandForm::While => {
+            panic!("while hypergraphs not implemented yet")
         }
     }
 }
@@ -95,6 +96,47 @@ fn sequence_graph(tree: &CommandDerivationTree) -> OpenHypergraph<TypeExpr, Comm
     compose_lax_unchecked(&left, &right)
 }
 
+fn if_graph(tree: &CommandDerivationTree) -> OpenHypergraph<TypeExpr, CommandEdge> {
+    if tree.children().len() != 3 {
+        panic!("if expects predicate, then, else");
+    }
+    let (pred_tree, then_tree, else_tree) = match (
+        &tree.children()[0],
+        &tree.children()[1],
+        &tree.children()[2],
+    ) {
+        (
+            CommandChild::Predicate(pred),
+            CommandChild::Command(then_cmd),
+            CommandChild::Command(else_cmd),
+        ) => (pred, then_cmd, else_cmd),
+        _ => panic!("if expects predicate, then, else"),
+    };
+
+    let context_entries = tree.judgment().context().entries();
+    let context_types: Vec<TypeExpr> = context_entries
+        .iter()
+        .map(|(_, ty)| ty.clone())
+        .collect();
+
+    let pred_graph = predicate_graph(pred_tree, context_entries);
+    let neg_pred_graph = negate_predicate_graph(pred_graph.clone());
+
+    let then_graph = from_command_tree(then_tree);
+    let else_graph = from_command_tree(else_tree);
+
+    let then_guard =
+        compose_lax_unchecked(&lift_predicate_graph(pred_graph, &context_types), &then_graph);
+    let else_guard =
+        compose_lax_unchecked(&lift_predicate_graph(neg_pred_graph, &context_types), &else_graph);
+
+    OpenHypergraph::singleton(
+        CommandEdge::Convolution(vec![then_guard, else_guard]),
+        context_types.clone(),
+        context_types,
+    )
+}
+
 fn tensor_many(
     mut graphs: Vec<OpenHypergraph<TypeExpr, CommandEdge>>,
 ) -> OpenHypergraph<TypeExpr, CommandEdge> {
@@ -166,5 +208,48 @@ fn copy_n(types: &[TypeExpr], copies: usize) -> OpenHypergraph<TypeExpr, Command
         targets.extend(nodes.iter().copied());
     }
     graph.targets = targets;
+    graph
+}
+
+fn predicate_graph(
+    pred_tree: &crate::typing::DeductionTree,
+    context_entries: &[(String, TypeExpr)],
+) -> OpenHypergraph<TypeExpr, CommandEdge> {
+    hypergraph::from_deduction_tree_with_context(pred_tree, context_entries)
+        .map_edges(CommandEdge::Atom)
+}
+
+fn negate_predicate_graph(
+    pred_graph: OpenHypergraph<TypeExpr, CommandEdge>,
+) -> OpenHypergraph<TypeExpr, CommandEdge> {
+    let not_graph = OpenHypergraph::singleton(
+        CommandEdge::Atom("not".to_string()),
+        vec![TypeExpr::Unit],
+        vec![TypeExpr::Unit],
+    );
+    compose_lax_unchecked(&pred_graph, &not_graph)
+}
+
+fn lift_predicate_graph(
+    pred_graph: OpenHypergraph<TypeExpr, CommandEdge>,
+    context_types: &[TypeExpr],
+) -> OpenHypergraph<TypeExpr, CommandEdge> {
+    let copy = copy_n(context_types, 2);
+    let passthrough = OpenHypergraph::identity(context_types.to_vec());
+    let tensor = tensor_many(vec![passthrough, pred_graph]);
+    let composed = compose_lax_unchecked(&copy, &tensor);
+    let drop = drop_last_graph(context_types);
+    compose_lax_unchecked(&composed, &drop)
+}
+
+fn drop_last_graph(context_types: &[TypeExpr]) -> OpenHypergraph<TypeExpr, CommandEdge> {
+    let mut graph = OpenHypergraph::empty();
+    let mut nodes = Vec::with_capacity(context_types.len() + 1);
+    for ty in context_types {
+        nodes.push(graph.new_node(ty.clone()));
+    }
+    nodes.push(graph.new_node(TypeExpr::Unit));
+    graph.sources = nodes.clone();
+    graph.targets = nodes[..context_types.len()].to_vec();
     graph
 }

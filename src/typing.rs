@@ -1,6 +1,8 @@
 use std::fmt;
 
-use rustpython_parser::ast::{BoolOp, Constant, Expr, ExprCall, ExprName, Operator, UnaryOp};
+use rustpython_parser::ast::{
+    BoolOp, CmpOp, Constant, Expr, ExprCall, ExprCompare, ExprName, Operator, UnaryOp,
+};
 
 use crate::context::Context;
 use crate::types::TypeExpr;
@@ -249,6 +251,7 @@ fn infer_predicate_expr(expr: &Expr, context: &Context) -> DeductionTree {
             )
         }
         Expr::Call(call) => infer_predicate_call(expr, call, context),
+        Expr::Compare(compare) => infer_predicate_compare(expr, compare, context),
         Expr::Constant(c) => match &c.value {
             Constant::Bool(value) => make_leaf(
                 "PredConst",
@@ -261,6 +264,39 @@ fn infer_predicate_expr(expr: &Expr, context: &Context) -> DeductionTree {
         },
         _ => panic!("unsupported predicate expression: {:?}", expr),
     }
+}
+
+fn infer_predicate_compare(
+    expr: &Expr,
+    compare: &ExprCompare,
+    context: &Context,
+) -> DeductionTree {
+    if compare.ops.len() != 1 || compare.comparators.len() != 1 {
+        panic!("chained comparisons are not supported in predicates");
+    }
+
+    let left = infer_expression_in_context(&compare.left, context);
+    let right = infer_expression_in_context(&compare.comparators[0], context);
+
+    if !is_potential_numeric(left.judgment.ty())
+        || !is_potential_numeric(right.judgment.ty())
+    {
+        panic!(
+            "type error: comparison expects numeric operands, got {} and {}",
+            left.judgment.ty(),
+            right.judgment.ty()
+        );
+    }
+
+    let op_label = compare_op_label(&compare.ops[0]);
+    make_node(
+        "PredCompare",
+        expr,
+        context,
+        TypeExpr::Unit,
+        vec![left, right],
+        ExprForm::Compare(op_label),
+    )
 }
 
 fn infer_predicate_call(expr: &Expr, call: &ExprCall, context: &Context) -> DeductionTree {
@@ -480,6 +516,18 @@ fn expr_to_string(expr: &Expr) -> String {
             }
             expr
         }
+        Expr::Compare(compare) => {
+            if compare.ops.len() != 1 || compare.comparators.len() != 1 {
+                return format!("{:?}", expr);
+            }
+            let op = compare_op_display(&compare.ops[0]);
+            format!(
+                "({} {} {})",
+                expr_to_string(&compare.left),
+                op,
+                expr_to_string(&compare.comparators[0])
+            )
+        }
         _ => format!("{:?}", expr),
     }
 }
@@ -510,6 +558,30 @@ fn unary_op_label(op: UnaryOp) -> String {
     }
 }
 
+fn compare_op_label(op: &CmpOp) -> String {
+    match op {
+        CmpOp::Lt => "<".to_string(),
+        CmpOp::LtE => "<=".to_string(),
+        CmpOp::Gt => ">".to_string(),
+        CmpOp::GtE => ">=".to_string(),
+        CmpOp::Eq => "==".to_string(),
+        CmpOp::NotEq => "!=".to_string(),
+        _ => "cmp".to_string(),
+    }
+}
+
+fn compare_op_display(op: &CmpOp) -> &'static str {
+    match op {
+        CmpOp::Lt => "<",
+        CmpOp::LtE => "<=",
+        CmpOp::Gt => ">",
+        CmpOp::GtE => ">=",
+        CmpOp::Eq => "==",
+        CmpOp::NotEq => "!=",
+        _ => "?",
+    }
+}
+
 fn binop_label(op: &Operator) -> String {
     match op {
         Operator::Add => "+".to_string(),
@@ -531,6 +603,7 @@ pub enum ExprForm {
     BinOp(String),
     Call(String),
     BoolOp(String),
+    Compare(String),
 }
 
 fn is_potential_bool(expr: &TypeExpr) -> bool {
@@ -539,7 +612,18 @@ fn is_potential_bool(expr: &TypeExpr) -> bool {
         TypeExpr::Unit => false,
         TypeExpr::Var(_) => true,
         TypeExpr::Lub(left, right) => is_potential_bool(left) && is_potential_bool(right),
+        TypeExpr::Union(left, right) => is_potential_bool(left) && is_potential_bool(right),
         TypeExpr::Int | TypeExpr::Float => false,
+    }
+}
+
+fn is_potential_numeric(expr: &TypeExpr) -> bool {
+    match expr {
+        TypeExpr::Int | TypeExpr::Float => true,
+        TypeExpr::Var(_) => true,
+        TypeExpr::Lub(left, right) => is_potential_numeric(left) && is_potential_numeric(right),
+        TypeExpr::Union(left, right) => is_potential_numeric(left) && is_potential_numeric(right),
+        TypeExpr::Bool | TypeExpr::Unit => false,
     }
 }
 

@@ -173,13 +173,14 @@ fn infer_if(if_stmt: &StmtIf, context: &Context) -> (CommandDerivationTree, Cont
         panic!("type error: if predicate must have type 1");
     }
 
-    let then_tree = infer_block(&if_stmt.body, context).0;
-    let else_tree = infer_block(&if_stmt.orelse, context).0;
+    let (then_tree, then_context) = infer_block(&if_stmt.body, context);
+    let (else_tree, else_context) = infer_block(&if_stmt.orelse, context);
+    let merged_context = merge_contexts(context, &then_context, &else_context);
     let cmd = format!("if {} then ... else ...", pred_tree.judgment().expr());
     (
         make_node(
             "If",
-            context,
+            &merged_context,
             cmd,
             vec![
                 CommandChild::Predicate(pred_tree),
@@ -188,7 +189,7 @@ fn infer_if(if_stmt: &StmtIf, context: &Context) -> (CommandDerivationTree, Cont
             ],
             CommandForm::If,
         ),
-        context.clone(),
+        merged_context,
     )
 }
 
@@ -198,7 +199,8 @@ fn infer_while(while_stmt: &StmtWhile, context: &Context) -> (CommandDerivationT
         panic!("type error: while predicate must have type 1");
     }
 
-    let body_tree = infer_block(&while_stmt.body, context).0;
+    let (body_tree, body_context) = infer_block(&while_stmt.body, context);
+    ensure_context_unchanged(context, &body_context);
     let cmd = format!("while {} do ...", pred_tree.judgment().expr());
     (
         make_node(
@@ -229,7 +231,7 @@ fn infer_block(stmts: &[Stmt], context: &Context) -> (CommandDerivationTree, Con
         let (next_tree, next_context) = infer_command(stmt, &acc_context);
         acc_tree = make_node(
             "Seq",
-            context,
+            &next_context,
             format!("{}; ...", acc_tree.judgment.command),
             vec![CommandChild::Command(acc_tree), CommandChild::Command(next_tree)],
             CommandForm::Seq,
@@ -271,6 +273,46 @@ fn make_node(
         },
         children,
         form,
+    }
+}
+
+fn merge_contexts(base: &Context, left: &Context, right: &Context) -> Context {
+    let mut merged = Context::default();
+    for (name, _) in base.entries() {
+        let left_ty = left
+            .get(&name)
+            .cloned()
+            .unwrap_or_else(|| panic!("missing `{}` in then-context", name));
+        let right_ty = right
+            .get(&name)
+            .cloned()
+            .unwrap_or_else(|| panic!("missing `{}` in else-context", name));
+        let merged_ty = if left_ty == right_ty {
+            left_ty
+        } else {
+            TypeExpr::Union(Box::new(left_ty), Box::new(right_ty))
+        };
+        merged.set_var(&name, merged_ty);
+    }
+    merged
+}
+
+fn ensure_context_unchanged(before: &Context, after: &Context) {
+    for (name, _) in before.entries() {
+        let before_ty = before
+            .get(&name)
+            .cloned()
+            .unwrap_or_else(|| panic!("missing `{}` in loop context", name));
+        let after_ty = after
+            .get(&name)
+            .cloned()
+            .unwrap_or_else(|| panic!("missing `{}` in loop context", name));
+        if before_ty != after_ty {
+            panic!(
+                "type error: while body changes type of `{}` from {} to {}",
+                name, before_ty, after_ty
+            );
+        }
     }
 }
 

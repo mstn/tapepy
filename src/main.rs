@@ -1,6 +1,7 @@
 mod context;
 mod command_edge;
 mod command_hypergraph;
+mod command_dot;
 mod hypergraph;
 mod command_typing;
 mod solver;
@@ -10,7 +11,8 @@ mod typing;
 use std::error::Error;
 
 use graphviz_rust::printer::{DotPrinter, PrinterContext};
-use open_hypergraphs_dot::{generate_dot_with, svg::to_svg_with, Options};
+use open_hypergraphs_dot::Options;
+use command_dot::{generate_dot_with_clusters, to_svg_with_clusters};
 use open_hypergraphs::lax::OpenHypergraph;
 use command_edge::CommandEdge;
 use rustpython_parser::{ast, Parse};
@@ -63,12 +65,12 @@ fn write_svg_with_fallback(
 ) -> Result<(), Box<dyn Error>> {
     let svg_path = format!("{}.svg", prefix);
     let dot_path = format!("{}.dot", prefix);
-    match to_svg_with(graph, opts) {
+    match to_svg_with_clusters(graph, opts) {
         Ok(svg) => {
             std::fs::write(svg_path, svg)?;
         }
         Err(err) => {
-            let dot_graph = generate_dot_with(graph, opts);
+            let dot_graph = generate_dot_with_clusters(graph, opts);
             let mut ctx = PrinterContext::default();
             let dot_string = dot_graph.print(&mut ctx);
             std::fs::write(dot_path, dot_string)?;

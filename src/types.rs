@@ -11,6 +11,7 @@ pub enum TypeExpr {
     Float,
     Var(TypeVar),
     Lub(Box<TypeExpr>, Box<TypeExpr>),
+    Union(Box<TypeExpr>, Box<TypeExpr>),
 }
 
 impl TypeExpr {
@@ -39,6 +40,7 @@ impl fmt::Display for TypeExpr {
             TypeExpr::Float => write!(f, "Float"),
             TypeExpr::Var(TypeVar(id)) => write!(f, "a{}", id),
             TypeExpr::Lub(left, right) => write!(f, "lub({}, {})", left, right),
+            TypeExpr::Union(left, right) => write!(f, "union({}, {})", left, right),
         }
     }
 }

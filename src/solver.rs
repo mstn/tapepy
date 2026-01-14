@@ -27,6 +27,15 @@ impl TypeSubstitution {
                 let rhs = self.apply(right);
                 TypeExpr::lub(lhs, rhs)
             }
+            TypeExpr::Union(left, right) => {
+                let lhs = self.apply(left);
+                let rhs = self.apply(right);
+                if lhs == rhs {
+                    lhs
+                } else {
+                    TypeExpr::Union(Box::new(lhs), Box::new(rhs))
+                }
+            }
         }
     }
 }
@@ -85,6 +94,10 @@ fn collect_vars_expr(expr: &TypeExpr, vars: &mut HashSet<TypeVar>) {
             vars.insert(var.clone());
         }
         TypeExpr::Lub(left, right) => {
+            collect_vars_expr(left, vars);
+            collect_vars_expr(right, vars);
+        }
+        TypeExpr::Union(left, right) => {
             collect_vars_expr(left, vars);
             collect_vars_expr(right, vars);
         }
@@ -149,6 +162,15 @@ fn eval_expr(expr: &TypeExpr, assignment: &HashMap<TypeVar, TypeExpr>) -> TypeEx
             let lhs = eval_expr(left, assignment);
             let rhs = eval_expr(right, assignment);
             TypeExpr::lub(lhs, rhs)
+        }
+        TypeExpr::Union(left, right) => {
+            let lhs = eval_expr(left, assignment);
+            let rhs = eval_expr(right, assignment);
+            if lhs == rhs {
+                lhs
+            } else {
+                TypeExpr::Union(Box::new(lhs), Box::new(rhs))
+            }
         }
     }
 }
