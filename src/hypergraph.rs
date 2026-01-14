@@ -240,21 +240,6 @@ fn tensor_many(
     acc
 }
 
-fn compose_lax(
-    lhs: &OpenHypergraph<TypeExpr, String>,
-    rhs: &OpenHypergraph<TypeExpr, String>,
-) -> OpenHypergraph<TypeExpr, String> {
-    (lhs >> rhs).unwrap_or_else(|| {
-        panic!(
-            "lax composition failed: {:?} -> {:?} cannot compose with {:?} -> {:?}",
-            lhs.source(),
-            lhs.target(),
-            rhs.source(),
-            rhs.target()
-        )
-    })
-}
-
 fn compose_lax_unchecked(
     lhs: &OpenHypergraph<TypeExpr, String>,
     rhs: &OpenHypergraph<TypeExpr, String>,
