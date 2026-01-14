@@ -1,3 +1,5 @@
+use open_hypergraphs::lax::{Arrow as _, Monoidal, OpenHypergraph};
+
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct Sort(pub String);
 
@@ -192,10 +194,7 @@ impl Circuit {
                     panic!("unknown sort `{}`", sorts.0);
                 }
                 let mono = Monomial::atom(sorts.clone());
-                CircuitType::new(
-                    mono.clone(),
-                    Monomial::product(mono.clone(), mono),
-                )
+                CircuitType::new(mono.clone(), Monomial::product(mono.clone(), mono))
             }
             Circuit::Discard(sorts) => {
                 if !signature.has_sort(sorts) {
@@ -277,4 +276,121 @@ impl Tape {
             }
         }
     }
+}
+
+impl Circuit {
+    pub fn to_hypergraph(&self, signature: &MonoidalSignature) -> OpenHypergraph<Sort, Generator> {
+        match self {
+            Circuit::Id(sort) => {
+                if !signature.has_sort(sort) {
+                    panic!("unknown sort `{}`", sort.0);
+                }
+                OpenHypergraph::identity(vec![sort.clone()])
+            }
+            Circuit::IdOne => OpenHypergraph::empty(),
+            Circuit::Generator(name) => {
+                let gen = signature
+                    .generator(name)
+                    .unwrap_or_else(|| panic!("unknown generator `{}`", name.0));
+                gen.arity.validate(signature);
+                gen.coarity.validate(signature);
+                OpenHypergraph::singleton(
+                    gen.name.clone(),
+                    monomial_to_sorts(&gen.arity),
+                    monomial_to_sorts(&gen.coarity),
+                )
+            }
+            Circuit::Swap { left, right } => {
+                if !signature.has_sort(left) {
+                    panic!("unknown sort `{}`", left.0);
+                }
+                if !signature.has_sort(right) {
+                    panic!("unknown sort `{}`", right.0);
+                }
+                let mut graph = OpenHypergraph::empty();
+                let left_id = graph.new_node(left.clone());
+                let right_id = graph.new_node(right.clone());
+                graph.sources = vec![left_id, right_id];
+                graph.targets = vec![right_id, left_id];
+                graph
+            }
+            Circuit::Seq(left, right) => {
+                let left_graph = left.to_hypergraph(signature);
+                let right_graph = right.to_hypergraph(signature);
+                compose_lax_unchecked(&left_graph, &right_graph)
+            }
+            Circuit::Product(left, right) => {
+                let left_graph = left.to_hypergraph(signature);
+                let right_graph = right.to_hypergraph(signature);
+                left_graph.tensor(&right_graph)
+            }
+            Circuit::Copy(sort) => {
+                if !signature.has_sort(sort) {
+                    panic!("unknown sort `{}`", sort.0);
+                }
+                let mut graph = OpenHypergraph::empty();
+                let node = graph.new_node(sort.clone());
+                graph.sources = vec![node];
+                graph.targets = vec![node, node];
+                graph
+            }
+            Circuit::Discard(sort) => {
+                if !signature.has_sort(sort) {
+                    panic!("unknown sort `{}`", sort.0);
+                }
+                let mut graph = OpenHypergraph::empty();
+                let node = graph.new_node(sort.clone());
+                graph.sources = vec![node];
+                graph.targets = Vec::new();
+                graph
+            }
+            Circuit::Join(sort) => {
+                if !signature.has_sort(sort) {
+                    panic!("unknown sort `{}`", sort.0);
+                }
+                let mut graph = OpenHypergraph::empty();
+                let node = graph.new_node(sort.clone());
+                graph.sources = vec![node, node];
+                graph.targets = vec![node];
+                graph
+            }
+        }
+    }
+}
+
+fn monomial_to_sorts(monomial: &Monomial) -> Vec<Sort> {
+    match monomial {
+        Monomial::One => Vec::new(),
+        Monomial::Atom(name) => vec![name.clone()],
+        Monomial::Product(left, right) => {
+            let mut left_terms = monomial_to_sorts(left);
+            let mut right_terms = monomial_to_sorts(right);
+            left_terms.append(&mut right_terms);
+            left_terms
+        }
+    }
+}
+
+fn compose_lax_unchecked(
+    lhs: &OpenHypergraph<Sort, Generator>,
+    rhs: &OpenHypergraph<Sort, Generator>,
+) -> OpenHypergraph<Sort, Generator> {
+    if lhs.targets.len() != rhs.sources.len() {
+        panic!(
+            "unchecked composition requires same arity, got {} vs {}",
+            lhs.targets.len(),
+            rhs.sources.len()
+        );
+    }
+
+    let n = lhs.hypergraph.nodes.len();
+    let mut composed = lhs.tensor(rhs);
+
+    for (u, v) in lhs.targets.iter().zip(rhs.sources.iter()) {
+        composed.unify(*u, open_hypergraphs::lax::NodeId(v.0 + n));
+    }
+
+    composed.sources = composed.sources[..lhs.sources.len()].to_vec();
+    composed.targets = composed.targets[lhs.targets.len()..].to_vec();
+    composed
 }
