@@ -1,19 +1,13 @@
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct SortName(pub String);
+pub struct Sort(pub String);
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct GeneratorName(pub String);
-
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub enum Sort {
-    One,
-    Atom(SortName),
-}
+pub struct Generator(pub String);
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum Monomial {
     One,
-    Atom(SortName),
+    Atom(Sort),
     Product(Box<Monomial>, Box<Monomial>),
 }
 
@@ -22,7 +16,7 @@ impl Monomial {
         Monomial::One
     }
 
-    pub fn atom(sort: SortName) -> Self {
+    pub fn atom(sort: Sort) -> Self {
         Monomial::Atom(sort)
     }
 
@@ -45,26 +39,6 @@ impl Monomial {
             Monomial::Product(left, right) => {
                 left.validate(signature);
                 right.validate(signature);
-            }
-        }
-    }
-}
-
-impl Sort {
-    pub fn to_monomial(&self) -> Monomial {
-        match self {
-            Sort::One => Monomial::One,
-            Sort::Atom(name) => Monomial::Atom(name.clone()),
-        }
-    }
-
-    pub fn validate(&self, signature: &MonoidalSignature) {
-        match self {
-            Sort::One => {}
-            Sort::Atom(name) => {
-                if !signature.has_sort(name) {
-                    panic!("unknown sort `{}`", name.0);
-                }
             }
         }
     }
@@ -97,23 +71,23 @@ impl Polynomial {
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct GeneratorSignature {
-    pub name: GeneratorName,
+    pub name: Generator,
     pub arity: Monomial,
     pub coarity: Monomial,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MonoidalSignature {
-    pub sorts: Vec<SortName>,
+    pub sorts: Vec<Sort>,
     pub generators: Vec<GeneratorSignature>,
 }
 
 impl MonoidalSignature {
-    pub fn generator(&self, name: &GeneratorName) -> Option<&GeneratorSignature> {
+    pub fn generator(&self, name: &Generator) -> Option<&GeneratorSignature> {
         self.generators.iter().find(|gen| &gen.name == name)
     }
 
-    pub fn has_sort(&self, name: &SortName) -> bool {
+    pub fn has_sort(&self, name: &Sort) -> bool {
         self.sorts.iter().any(|sort| sort == name)
     }
 }
@@ -121,7 +95,8 @@ impl MonoidalSignature {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Circuit {
     Id(Sort),
-    Generator(GeneratorName),
+    IdOne,
+    Generator(Generator),
     Swap { left: Sort, right: Sort },
     Seq(Box<Circuit>, Box<Circuit>),
     Product(Box<Circuit>, Box<Circuit>),
@@ -133,6 +108,7 @@ pub enum Circuit {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Tape {
     Id(Monomial),
+    IdZero,
     EmbedCircuit(Box<Circuit>),
     Swap { left: Monomial, right: Monomial },
     Seq(Box<Tape>, Box<Tape>),
@@ -170,11 +146,14 @@ impl TapeType {
 impl Circuit {
     pub fn typing(&self, signature: &MonoidalSignature) -> CircuitType {
         match self {
-            Circuit::Id(sorts) => {
-                sorts.validate(signature);
-                let mono = sorts.to_monomial();
+            Circuit::Id(sort) => {
+                if !signature.has_sort(sort) {
+                    panic!("unknown sort `{}`", sort.0);
+                }
+                let mono = Monomial::atom(sort.clone());
                 CircuitType::new(mono.clone(), mono)
             }
+            Circuit::IdOne => CircuitType::new(Monomial::one(), Monomial::one()),
             Circuit::Generator(name) => {
                 let gen = signature
                     .generator(name)
@@ -184,11 +163,15 @@ impl Circuit {
                 CircuitType::new(gen.arity.clone(), gen.coarity.clone())
             }
             Circuit::Swap { left, right } => {
-                left.validate(signature);
-                right.validate(signature);
+                if !signature.has_sort(left) {
+                    panic!("unknown sort `{}`", left.0);
+                }
+                if !signature.has_sort(right) {
+                    panic!("unknown sort `{}`", right.0);
+                }
                 CircuitType::new(
-                    Monomial::product(left.to_monomial(), right.to_monomial()),
-                    Monomial::product(right.to_monomial(), left.to_monomial()),
+                    Monomial::product(Monomial::atom(left.clone()), Monomial::atom(right.clone())),
+                    Monomial::product(Monomial::atom(right.clone()), Monomial::atom(left.clone())),
                 )
             }
             Circuit::Seq(left, right) => {
@@ -205,20 +188,26 @@ impl Circuit {
                 )
             }
             Circuit::Copy(sorts) => {
-                sorts.validate(signature);
-                let mono = sorts.to_monomial();
+                if !signature.has_sort(sorts) {
+                    panic!("unknown sort `{}`", sorts.0);
+                }
+                let mono = Monomial::atom(sorts.clone());
                 CircuitType::new(
                     mono.clone(),
                     Monomial::product(mono.clone(), mono),
                 )
             }
             Circuit::Discard(sorts) => {
-                sorts.validate(signature);
-                CircuitType::new(sorts.to_monomial(), Monomial::one())
+                if !signature.has_sort(sorts) {
+                    panic!("unknown sort `{}`", sorts.0);
+                }
+                CircuitType::new(Monomial::atom(sorts.clone()), Monomial::one())
             }
             Circuit::Join(sorts) => {
-                sorts.validate(signature);
-                let mono = sorts.to_monomial();
+                if !signature.has_sort(sorts) {
+                    panic!("unknown sort `{}`", sorts.0);
+                }
+                let mono = Monomial::atom(sorts.clone());
                 CircuitType::new(Monomial::product(mono.clone(), mono.clone()), mono)
             }
         }
@@ -233,6 +222,7 @@ impl Tape {
                 let poly = Polynomial::monomial(mono.clone());
                 TapeType::new(poly.clone(), poly)
             }
+            Tape::IdZero => TapeType::new(Polynomial::zero(), Polynomial::zero()),
             Tape::EmbedCircuit(circuit) => {
                 let ty = circuit.typing(signature);
                 TapeType::new(
