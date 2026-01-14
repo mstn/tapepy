@@ -34,12 +34,14 @@ impl TypeSubstitution {
 #[derive(Debug)]
 pub enum SolveError {
     NoSolution,
+    UnresolvedType(TypeExpr),
 }
 
 impl fmt::Display for SolveError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             SolveError::NoSolution => write!(f, "no type assignment satisfies constraints"),
+            SolveError::UnresolvedType(expr) => write!(f, "unresolved type expression: {}", expr),
         }
     }
 }
@@ -54,7 +56,7 @@ pub fn solve_hypergraph_types(
     let vars_list: Vec<TypeVar> = vars.into_iter().collect();
 
     let mut assignment = HashMap::new();
-    if backtrack_solve(&vars_list, 0, &mut assignment, &constraints) {
+    if backtrack_solve(&vars_list, 0, &mut assignment, &constraints, graph) {
         Ok(TypeSubstitution { mapping: assignment })
     } else {
         Err(SolveError::NoSolution)
@@ -112,17 +114,22 @@ fn backtrack_solve(
     idx: usize,
     assignment: &mut HashMap<TypeVar, TypeExpr>,
     constraints: &[(TypeExpr, TypeExpr)],
+    graph: &OpenHypergraph<TypeExpr, String>,
 ) -> bool {
     if idx == vars.len() {
-        return constraints.iter().all(|(lhs, rhs)| {
-            eval_expr(lhs, assignment) == eval_expr(rhs, assignment)
-        });
+        let constraints_ok = constraints
+            .iter()
+            .all(|(lhs, rhs)| eval_expr(lhs, assignment) == eval_expr(rhs, assignment));
+        if !constraints_ok {
+            return false;
+        }
+        return primitives_ok(graph, assignment);
     }
 
     let var = vars[idx].clone();
     for choice in [TypeExpr::Bool, TypeExpr::Unit, TypeExpr::Int, TypeExpr::Float] {
         assignment.insert(var.clone(), choice.clone());
-        if backtrack_solve(vars, idx + 1, assignment, constraints) {
+        if backtrack_solve(vars, idx + 1, assignment, constraints, graph) {
             return true;
         }
     }
@@ -146,4 +153,17 @@ fn eval_expr(expr: &TypeExpr, assignment: &HashMap<TypeVar, TypeExpr>) -> TypeEx
             TypeExpr::lub(lhs, rhs)
         }
     }
+}
+
+fn primitives_ok(
+    graph: &OpenHypergraph<TypeExpr, String>,
+    assignment: &HashMap<TypeVar, TypeExpr>,
+) -> bool {
+    graph.hypergraph.nodes.iter().all(|label| {
+        let resolved = eval_expr(label, assignment);
+        matches!(
+            resolved,
+            TypeExpr::Bool | TypeExpr::Unit | TypeExpr::Int | TypeExpr::Float
+        )
+    })
 }
