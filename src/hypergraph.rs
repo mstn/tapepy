@@ -30,7 +30,9 @@ pub fn from_deduction_tree_with_context(
     compose_lax_unchecked(&wiring, &expr_graph)
 }
 
-pub fn format_hypergraph(graph: &OpenHypergraph<TypeExpr, String>) -> String {
+pub fn format_hypergraph<A: std::fmt::Display>(
+    graph: &OpenHypergraph<TypeExpr, A>,
+) -> String {
     let mut out = String::new();
     out.push_str("OpenHypergraph\n");
 

@@ -1,4 +1,5 @@
 mod context;
+mod command_edge;
 mod command_hypergraph;
 mod hypergraph;
 mod command_typing;
@@ -11,6 +12,7 @@ use std::error::Error;
 use graphviz_rust::printer::{DotPrinter, PrinterContext};
 use open_hypergraphs_dot::{generate_dot_with, svg::to_svg_with, Options};
 use open_hypergraphs::lax::OpenHypergraph;
+use command_edge::CommandEdge;
 use rustpython_parser::{ast, Parse};
 use command_typing::infer_command_from_suite;
 use solver::{apply_substitution, solve_hypergraph_types};
@@ -34,7 +36,7 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     let opts = Options {
         node_label: Box::new(|t: &types::TypeExpr| t.to_string()),
-        edge_label: Box::new(|s: &String| s.clone()),
+        edge_label: Box::new(|e: &CommandEdge| e.to_string()),
         ..Options::default()
     };
 
@@ -56,8 +58,8 @@ fn main() -> Result<(), Box<dyn Error>> {
 
 fn write_svg_with_fallback(
     prefix: &str,
-    graph: &OpenHypergraph<types::TypeExpr, String>,
-    opts: &Options<types::TypeExpr, String>,
+    graph: &OpenHypergraph<types::TypeExpr, CommandEdge>,
+    opts: &Options<types::TypeExpr, CommandEdge>,
 ) -> Result<(), Box<dyn Error>> {
     let svg_path = format!("{}.svg", prefix);
     let dot_path = format!("{}.dot", prefix);

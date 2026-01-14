@@ -48,8 +48,8 @@ impl fmt::Display for SolveError {
 
 impl std::error::Error for SolveError {}
 
-pub fn solve_hypergraph_types(
-    graph: &OpenHypergraph<TypeExpr, String>,
+pub fn solve_hypergraph_types<A: Clone>(
+    graph: &OpenHypergraph<TypeExpr, A>,
 ) -> Result<TypeSubstitution, SolveError> {
     let vars = collect_vars(graph);
     let constraints = collect_constraints(graph);
@@ -63,14 +63,14 @@ pub fn solve_hypergraph_types(
     }
 }
 
-pub fn apply_substitution(
-    graph: &OpenHypergraph<TypeExpr, String>,
+pub fn apply_substitution<A: Clone>(
+    graph: &OpenHypergraph<TypeExpr, A>,
     subst: &TypeSubstitution,
-) -> OpenHypergraph<TypeExpr, String> {
+) -> OpenHypergraph<TypeExpr, A> {
     graph.clone().map_nodes(|t| subst.apply(&t))
 }
 
-fn collect_vars(graph: &OpenHypergraph<TypeExpr, String>) -> HashSet<TypeVar> {
+fn collect_vars<A>(graph: &OpenHypergraph<TypeExpr, A>) -> HashSet<TypeVar> {
     let mut vars = HashSet::new();
     for label in &graph.hypergraph.nodes {
         collect_vars_expr(label, &mut vars);
@@ -91,9 +91,7 @@ fn collect_vars_expr(expr: &TypeExpr, vars: &mut HashSet<TypeVar>) {
     }
 }
 
-fn collect_constraints(
-    graph: &OpenHypergraph<TypeExpr, String>,
-) -> Vec<(TypeExpr, TypeExpr)> {
+fn collect_constraints<A>(graph: &OpenHypergraph<TypeExpr, A>) -> Vec<(TypeExpr, TypeExpr)> {
     let mut constraints = Vec::new();
     for (from, to) in graph
         .hypergraph
@@ -109,12 +107,12 @@ fn collect_constraints(
     constraints
 }
 
-fn backtrack_solve(
+fn backtrack_solve<A>(
     vars: &[TypeVar],
     idx: usize,
     assignment: &mut HashMap<TypeVar, TypeExpr>,
     constraints: &[(TypeExpr, TypeExpr)],
-    graph: &OpenHypergraph<TypeExpr, String>,
+    graph: &OpenHypergraph<TypeExpr, A>,
 ) -> bool {
     if idx == vars.len() {
         let constraints_ok = constraints
@@ -155,8 +153,8 @@ fn eval_expr(expr: &TypeExpr, assignment: &HashMap<TypeVar, TypeExpr>) -> TypeEx
     }
 }
 
-fn primitives_ok(
-    graph: &OpenHypergraph<TypeExpr, String>,
+fn primitives_ok<A>(
+    graph: &OpenHypergraph<TypeExpr, A>,
     assignment: &HashMap<TypeVar, TypeExpr>,
 ) -> bool {
     graph.hypergraph.nodes.iter().all(|label| {

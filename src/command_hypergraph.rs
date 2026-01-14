@@ -1,11 +1,12 @@
 use open_hypergraphs::category::Arrow;
 use open_hypergraphs::lax::{Monoidal, OpenHypergraph};
 
+use crate::command_edge::CommandEdge;
 use crate::command_typing::{CommandChild, CommandDerivationTree, CommandForm};
 use crate::hypergraph;
 use crate::types::TypeExpr;
 
-pub fn from_command_tree(tree: &CommandDerivationTree) -> OpenHypergraph<TypeExpr, String> {
+pub fn from_command_tree(tree: &CommandDerivationTree) -> OpenHypergraph<TypeExpr, CommandEdge> {
     match tree.form() {
         CommandForm::Abort => discard_context(tree),
         CommandForm::Skip => identity_context(tree),
@@ -17,7 +18,7 @@ pub fn from_command_tree(tree: &CommandDerivationTree) -> OpenHypergraph<TypeExp
     }
 }
 
-fn discard_context(tree: &CommandDerivationTree) -> OpenHypergraph<TypeExpr, String> {
+fn discard_context(tree: &CommandDerivationTree) -> OpenHypergraph<TypeExpr, CommandEdge> {
     let mut graph = OpenHypergraph::empty();
     let sources = tree
         .judgment()
@@ -31,7 +32,7 @@ fn discard_context(tree: &CommandDerivationTree) -> OpenHypergraph<TypeExpr, Str
     graph
 }
 
-fn identity_context(tree: &CommandDerivationTree) -> OpenHypergraph<TypeExpr, String> {
+fn identity_context(tree: &CommandDerivationTree) -> OpenHypergraph<TypeExpr, CommandEdge> {
     let types = tree
         .judgment()
         .context()
@@ -42,7 +43,10 @@ fn identity_context(tree: &CommandDerivationTree) -> OpenHypergraph<TypeExpr, St
     OpenHypergraph::identity(types)
 }
 
-fn assignment_graph(tree: &CommandDerivationTree, name: &str) -> OpenHypergraph<TypeExpr, String> {
+fn assignment_graph(
+    tree: &CommandDerivationTree,
+    name: &str,
+) -> OpenHypergraph<TypeExpr, CommandEdge> {
     let context_entries = tree.judgment().context().entries();
     let index = context_entries
         .iter()
@@ -63,7 +67,8 @@ fn assignment_graph(tree: &CommandDerivationTree, name: &str) -> OpenHypergraph<
         _ => panic!("assignment expects an expression child"),
     };
 
-    let expr_graph = hypergraph::from_deduction_tree_with_context(expr_tree, &context_entries);
+    let expr_graph = hypergraph::from_deduction_tree_with_context(expr_tree, &context_entries)
+        .map_edges(CommandEdge::Atom);
 
     let left_id = OpenHypergraph::identity(left_types.clone());
     let right_id = OpenHypergraph::identity(right_types.clone());
@@ -73,7 +78,7 @@ fn assignment_graph(tree: &CommandDerivationTree, name: &str) -> OpenHypergraph<
     compose_lax_unchecked(&split, &updated)
 }
 
-fn sequence_graph(tree: &CommandDerivationTree) -> OpenHypergraph<TypeExpr, String> {
+fn sequence_graph(tree: &CommandDerivationTree) -> OpenHypergraph<TypeExpr, CommandEdge> {
     if tree.children().len() != 2 {
         panic!("sequence expects two command children");
     }
@@ -91,8 +96,8 @@ fn sequence_graph(tree: &CommandDerivationTree) -> OpenHypergraph<TypeExpr, Stri
 }
 
 fn tensor_many(
-    mut graphs: Vec<OpenHypergraph<TypeExpr, String>>,
-) -> OpenHypergraph<TypeExpr, String> {
+    mut graphs: Vec<OpenHypergraph<TypeExpr, CommandEdge>>,
+) -> OpenHypergraph<TypeExpr, CommandEdge> {
     if graphs.is_empty() {
         return OpenHypergraph::empty();
     }
@@ -105,9 +110,9 @@ fn tensor_many(
 }
 
 fn compose_lax_unchecked(
-    lhs: &OpenHypergraph<TypeExpr, String>,
-    rhs: &OpenHypergraph<TypeExpr, String>,
-) -> OpenHypergraph<TypeExpr, String> {
+    lhs: &OpenHypergraph<TypeExpr, CommandEdge>,
+    rhs: &OpenHypergraph<TypeExpr, CommandEdge>,
+) -> OpenHypergraph<TypeExpr, CommandEdge> {
     if lhs.targets.len() != rhs.sources.len() {
         panic!(
             "unchecked composition requires same arity, got {} vs {}",
@@ -131,7 +136,7 @@ fn compose_lax_unchecked(
 fn split_context_for_assignment(
     context_entries: &[(String, TypeExpr)],
     x_index: usize,
-) -> OpenHypergraph<TypeExpr, String> {
+) -> OpenHypergraph<TypeExpr, CommandEdge> {
     let left_types: Vec<TypeExpr> = context_entries[..x_index]
         .iter()
         .map(|(_, ty)| ty.clone())
@@ -149,7 +154,7 @@ fn split_context_for_assignment(
     tensor_many(vec![left_copy, x_id, right_copy])
 }
 
-fn copy_n(types: &[TypeExpr], copies: usize) -> OpenHypergraph<TypeExpr, String> {
+fn copy_n(types: &[TypeExpr], copies: usize) -> OpenHypergraph<TypeExpr, CommandEdge> {
     let mut graph = OpenHypergraph::empty();
     let mut nodes = Vec::with_capacity(types.len());
     for ty in types {
