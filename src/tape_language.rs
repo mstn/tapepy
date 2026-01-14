@@ -1,28 +1,25 @@
 use open_hypergraphs::lax::{Arrow as _, Monoidal, OpenHypergraph};
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct Sort(pub String);
-
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct Generator(pub String);
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub enum Monomial {
+pub enum Monomial<S> {
     One,
-    Atom(Sort),
-    Product(Box<Monomial>, Box<Monomial>),
+    Atom(S),
+    Product(Box<Monomial<S>>, Box<Monomial<S>>),
 }
 
-impl Monomial {
+impl<S> Monomial<S> {
     pub fn one() -> Self {
         Monomial::One
     }
 
-    pub fn atom(sort: Sort) -> Self {
+    pub fn atom(sort: S) -> Self {
         Monomial::Atom(sort)
     }
 
-    pub fn product(left: Monomial, right: Monomial) -> Self {
+    pub fn product(left: Monomial<S>, right: Monomial<S>) -> Self {
         match (left, right) {
             (Monomial::One, right) => right,
             (left, Monomial::One) => left,
@@ -30,12 +27,15 @@ impl Monomial {
         }
     }
 
-    pub fn validate(&self, signature: &MonoidalSignature) {
+    pub fn validate(&self, signature: &MonoidalSignature<S>)
+    where
+        S: PartialEq + std::fmt::Debug,
+    {
         match self {
             Monomial::One => {}
             Monomial::Atom(name) => {
                 if !signature.has_sort(name) {
-                    panic!("unknown sort `{}`", name.0);
+                    panic!("unknown sort `{:?}`", name);
                 }
             }
             Monomial::Product(left, right) => {
@@ -47,22 +47,22 @@ impl Monomial {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub enum Polynomial {
+pub enum Polynomial<S> {
     Zero,
-    Monomial(Monomial),
-    Sum(Box<Polynomial>, Box<Polynomial>),
+    Monomial(Monomial<S>),
+    Sum(Box<Polynomial<S>>, Box<Polynomial<S>>),
 }
 
-impl Polynomial {
+impl<S> Polynomial<S> {
     pub fn zero() -> Self {
         Polynomial::Zero
     }
 
-    pub fn monomial(term: Monomial) -> Self {
+    pub fn monomial(term: Monomial<S>) -> Self {
         Polynomial::Monomial(term)
     }
 
-    pub fn sum(left: Polynomial, right: Polynomial) -> Self {
+    pub fn sum(left: Polynomial<S>, right: Polynomial<S>) -> Self {
         match (left, right) {
             (Polynomial::Zero, right) => right,
             (left, Polynomial::Zero) => left,
@@ -72,85 +72,85 @@ impl Polynomial {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct GeneratorSignature {
+pub struct GeneratorSignature<S> {
     pub name: Generator,
-    pub arity: Monomial,
-    pub coarity: Monomial,
+    pub arity: Monomial<S>,
+    pub coarity: Monomial<S>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct MonoidalSignature {
-    pub sorts: Vec<Sort>,
-    pub generators: Vec<GeneratorSignature>,
+pub struct MonoidalSignature<S> {
+    pub sorts: Vec<S>,
+    pub generators: Vec<GeneratorSignature<S>>,
 }
 
-impl MonoidalSignature {
-    pub fn generator(&self, name: &Generator) -> Option<&GeneratorSignature> {
+impl<S: PartialEq> MonoidalSignature<S> {
+    pub fn generator(&self, name: &Generator) -> Option<&GeneratorSignature<S>> {
         self.generators.iter().find(|gen| &gen.name == name)
     }
 
-    pub fn has_sort(&self, name: &Sort) -> bool {
+    pub fn has_sort(&self, name: &S) -> bool {
         self.sorts.iter().any(|sort| sort == name)
     }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum Circuit {
-    Id(Sort),
+pub enum Circuit<S> {
+    Id(S),
     IdOne,
     Generator(Generator),
-    Swap { left: Sort, right: Sort },
-    Seq(Box<Circuit>, Box<Circuit>),
-    Product(Box<Circuit>, Box<Circuit>),
-    Copy(Sort),
-    Discard(Sort),
-    Join(Sort),
+    Swap { left: S, right: S },
+    Seq(Box<Circuit<S>>, Box<Circuit<S>>),
+    Product(Box<Circuit<S>>, Box<Circuit<S>>),
+    Copy(S),
+    Discard(S),
+    Join(S),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum Tape {
-    Id(Monomial),
+pub enum Tape<S> {
+    Id(Monomial<S>),
     IdZero,
-    EmbedCircuit(Box<Circuit>),
-    Swap { left: Monomial, right: Monomial },
-    Seq(Box<Tape>, Box<Tape>),
-    Sum(Box<Tape>, Box<Tape>),
-    Discard(Monomial),
-    Split(Monomial),
-    Create(Monomial),
-    Merge(Monomial),
+    EmbedCircuit(Box<Circuit<S>>),
+    Swap { left: Monomial<S>, right: Monomial<S> },
+    Seq(Box<Tape<S>>, Box<Tape<S>>),
+    Sum(Box<Tape<S>>, Box<Tape<S>>),
+    Discard(Monomial<S>),
+    Split(Monomial<S>),
+    Create(Monomial<S>),
+    Merge(Monomial<S>),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct CircuitType {
-    pub domain: Monomial,
-    pub codomain: Monomial,
+pub struct CircuitType<S> {
+    pub domain: Monomial<S>,
+    pub codomain: Monomial<S>,
 }
 
-impl CircuitType {
-    pub fn new(domain: Monomial, codomain: Monomial) -> Self {
+impl<S> CircuitType<S> {
+    pub fn new(domain: Monomial<S>, codomain: Monomial<S>) -> Self {
         Self { domain, codomain }
     }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct TapeType {
-    pub domain: Polynomial,
-    pub codomain: Polynomial,
+pub struct TapeType<S> {
+    pub domain: Polynomial<S>,
+    pub codomain: Polynomial<S>,
 }
 
-impl TapeType {
-    pub fn new(domain: Polynomial, codomain: Polynomial) -> Self {
+impl<S> TapeType<S> {
+    pub fn new(domain: Polynomial<S>, codomain: Polynomial<S>) -> Self {
         Self { domain, codomain }
     }
 }
 
-impl Circuit {
-    pub fn typing(&self, signature: &MonoidalSignature) -> CircuitType {
+impl<S: Clone + PartialEq + std::fmt::Debug> Circuit<S> {
+    pub fn typing(&self, signature: &MonoidalSignature<S>) -> CircuitType<S> {
         match self {
             Circuit::Id(sort) => {
                 if !signature.has_sort(sort) {
-                    panic!("unknown sort `{}`", sort.0);
+                    panic!("unknown sort `{:?}`", sort);
                 }
                 let mono = Monomial::atom(sort.clone());
                 CircuitType::new(mono.clone(), mono)
@@ -166,10 +166,10 @@ impl Circuit {
             }
             Circuit::Swap { left, right } => {
                 if !signature.has_sort(left) {
-                    panic!("unknown sort `{}`", left.0);
+                    panic!("unknown sort `{:?}`", left);
                 }
                 if !signature.has_sort(right) {
-                    panic!("unknown sort `{}`", right.0);
+                    panic!("unknown sort `{:?}`", right);
                 }
                 CircuitType::new(
                     Monomial::product(Monomial::atom(left.clone()), Monomial::atom(right.clone())),
@@ -191,20 +191,20 @@ impl Circuit {
             }
             Circuit::Copy(sorts) => {
                 if !signature.has_sort(sorts) {
-                    panic!("unknown sort `{}`", sorts.0);
+                    panic!("unknown sort `{:?}`", sorts);
                 }
                 let mono = Monomial::atom(sorts.clone());
                 CircuitType::new(mono.clone(), Monomial::product(mono.clone(), mono))
             }
             Circuit::Discard(sorts) => {
                 if !signature.has_sort(sorts) {
-                    panic!("unknown sort `{}`", sorts.0);
+                    panic!("unknown sort `{:?}`", sorts);
                 }
                 CircuitType::new(Monomial::atom(sorts.clone()), Monomial::one())
             }
             Circuit::Join(sorts) => {
                 if !signature.has_sort(sorts) {
-                    panic!("unknown sort `{}`", sorts.0);
+                    panic!("unknown sort `{:?}`", sorts);
                 }
                 let mono = Monomial::atom(sorts.clone());
                 CircuitType::new(Monomial::product(mono.clone(), mono.clone()), mono)
@@ -213,8 +213,8 @@ impl Circuit {
     }
 }
 
-impl Tape {
-    pub fn typing(&self, signature: &MonoidalSignature) -> TapeType {
+impl<S: Clone + PartialEq + std::fmt::Debug> Tape<S> {
+    pub fn typing(&self, signature: &MonoidalSignature<S>) -> TapeType<S> {
         match self {
             Tape::Id(mono) => {
                 mono.validate(signature);
@@ -278,12 +278,15 @@ impl Tape {
     }
 }
 
-impl Circuit {
-    pub fn to_hypergraph(&self, signature: &MonoidalSignature) -> OpenHypergraph<Sort, Generator> {
+impl<S: Clone + PartialEq + std::fmt::Debug> Circuit<S> {
+    pub fn to_hypergraph(
+        &self,
+        signature: &MonoidalSignature<S>,
+    ) -> OpenHypergraph<S, Generator> {
         match self {
             Circuit::Id(sort) => {
                 if !signature.has_sort(sort) {
-                    panic!("unknown sort `{}`", sort.0);
+                    panic!("unknown sort `{:?}`", sort);
                 }
                 OpenHypergraph::identity(vec![sort.clone()])
             }
@@ -302,10 +305,10 @@ impl Circuit {
             }
             Circuit::Swap { left, right } => {
                 if !signature.has_sort(left) {
-                    panic!("unknown sort `{}`", left.0);
+                    panic!("unknown sort `{:?}`", left);
                 }
                 if !signature.has_sort(right) {
-                    panic!("unknown sort `{}`", right.0);
+                    panic!("unknown sort `{:?}`", right);
                 }
                 let mut graph = OpenHypergraph::empty();
                 let left_id = graph.new_node(left.clone());
@@ -326,7 +329,7 @@ impl Circuit {
             }
             Circuit::Copy(sort) => {
                 if !signature.has_sort(sort) {
-                    panic!("unknown sort `{}`", sort.0);
+                    panic!("unknown sort `{:?}`", sort);
                 }
                 let mut graph = OpenHypergraph::empty();
                 let node = graph.new_node(sort.clone());
@@ -336,7 +339,7 @@ impl Circuit {
             }
             Circuit::Discard(sort) => {
                 if !signature.has_sort(sort) {
-                    panic!("unknown sort `{}`", sort.0);
+                    panic!("unknown sort `{:?}`", sort);
                 }
                 let mut graph = OpenHypergraph::empty();
                 let node = graph.new_node(sort.clone());
@@ -346,7 +349,7 @@ impl Circuit {
             }
             Circuit::Join(sort) => {
                 if !signature.has_sort(sort) {
-                    panic!("unknown sort `{}`", sort.0);
+                    panic!("unknown sort `{:?}`", sort);
                 }
                 let mut graph = OpenHypergraph::empty();
                 let node = graph.new_node(sort.clone());
@@ -358,7 +361,7 @@ impl Circuit {
     }
 }
 
-fn monomial_to_sorts(monomial: &Monomial) -> Vec<Sort> {
+fn monomial_to_sorts<S: Clone>(monomial: &Monomial<S>) -> Vec<S> {
     match monomial {
         Monomial::One => Vec::new(),
         Monomial::Atom(name) => vec![name.clone()],
@@ -371,10 +374,10 @@ fn monomial_to_sorts(monomial: &Monomial) -> Vec<Sort> {
     }
 }
 
-fn compose_lax_unchecked(
-    lhs: &OpenHypergraph<Sort, Generator>,
-    rhs: &OpenHypergraph<Sort, Generator>,
-) -> OpenHypergraph<Sort, Generator> {
+fn compose_lax_unchecked<S: Clone>(
+    lhs: &OpenHypergraph<S, Generator>,
+    rhs: &OpenHypergraph<S, Generator>,
+) -> OpenHypergraph<S, Generator> {
     if lhs.targets.len() != rhs.sources.len() {
         panic!(
             "unchecked composition requires same arity, got {} vs {}",
