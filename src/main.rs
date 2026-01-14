@@ -7,6 +7,7 @@ mod command_typing;
 mod solver;
 mod types;
 mod typing;
+mod tape_language;
 
 use std::error::Error;
 
