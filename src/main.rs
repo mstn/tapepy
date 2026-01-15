@@ -6,6 +6,7 @@ mod context;
 mod expression_circuit;
 mod hypergraph;
 mod python_builtin_signatures;
+mod predicate_tape;
 mod solver;
 mod tape_language;
 mod types;
