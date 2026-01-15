@@ -1,5 +1,9 @@
+use std::sync::atomic::{AtomicUsize, Ordering};
+
+use open_hypergraphs::lax::OpenHypergraph;
+
 use crate::tape_language::{Circuit, GeneratorShape};
-use crate::types::TypeExpr;
+use crate::types::{TypeExpr, TypeVar};
 use crate::typing::{DeductionTree, ExprForm};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -75,6 +79,15 @@ pub fn circuit_from_expr(tree: &DeductionTree) -> Circuit<TypeExpr, ExprGenerato
     }
 }
 
+pub fn hypergraph_from_circuit(
+    circuit: &Circuit<TypeExpr, ExprGenerator>,
+) -> OpenHypergraph<TypeExpr, ExprGenerator> {
+    circuit.to_hypergraph(&mut || {
+        let id = NEXT_TYPE_VAR.fetch_add(1, Ordering::Relaxed);
+        TypeExpr::Var(TypeVar(id))
+    })
+}
+
 fn product_many<S, G>(mut circuits: Vec<Circuit<S, G>>) -> Circuit<S, G> {
     if circuits.is_empty() {
         return Circuit::IdOne;
@@ -92,3 +105,5 @@ fn assert_child_count(tree: &DeductionTree, expected: usize, label: &str) {
         panic!("{} expects {} children, got {}", label, expected, actual);
     }
 }
+
+static NEXT_TYPE_VAR: AtomicUsize = AtomicUsize::new(0);
