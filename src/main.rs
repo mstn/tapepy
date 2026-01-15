@@ -7,6 +7,7 @@ mod hypergraph;
 mod python_builtin_signatures;
 mod solver;
 mod tape_language;
+mod expression_circuit;
 mod types;
 mod typing;
 
