@@ -112,3 +112,34 @@ fn assert_child_count(tree: &DeductionTree, expected: usize, label: &str) {
 }
 
 static NEXT_TYPE_VAR: AtomicUsize = AtomicUsize::new(0);
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use rustpython_parser::{ast, Parse};
+
+    #[test]
+    fn complex_expression_hypergraph_contains_expected_ops() {
+        let source =
+            "(abs(x + 2) * float(y) + max(3, int(z))) > 0 and not (x < 1)";
+        let expr = ast::Expr::parse(source, "<test>").expect("parse expression");
+        let tree = crate::typing::infer_expression(&expr);
+        let circuit = circuit_from_expr(&tree);
+        let graph = hypergraph_from_circuit(&circuit);
+
+        let labels: Vec<String> = graph
+            .hypergraph
+            .edges
+            .iter()
+            .map(|edge| edge.name.clone())
+            .collect();
+
+        for expected in ["abs", "+", "*", "float", "max", "int", ">", "<", "not", "and"] {
+            assert!(
+                labels.iter().any(|label| label == expected),
+                "missing edge label `{}`",
+                expected
+            );
+        }
+    }
+}
