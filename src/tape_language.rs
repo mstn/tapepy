@@ -294,13 +294,21 @@ impl<S: Clone + PartialEq, G: GeneratorShape + Clone> Tape<S, G> {
             Tape::Id(mono) => OpenHypergraph::identity(vec![mono.clone()]),
             Tape::IdZero => OpenHypergraph::empty(),
             Tape::EmbedCircuit(circuit) => {
-                let lifted = lift_circuit(circuit);
-                let arity = circuit.typing();
-                OpenHypergraph::singleton(
-                    lifted,
-                    fresh_monomials(fresh_sort, arity.inputs),
-                    fresh_monomials(fresh_sort, arity.outputs),
-                )
+                match circuit.as_ref() {
+                    Circuit::Id(sort) => {
+                        OpenHypergraph::identity(vec![Monomial::atom(sort.clone())])
+                    }
+                    Circuit::IdOne => OpenHypergraph::empty(),
+                    _ => {
+                        let lifted = lift_circuit(circuit);
+                        let arity = circuit.typing();
+                        OpenHypergraph::singleton(
+                            lifted,
+                            fresh_monomials(fresh_sort, arity.inputs),
+                            fresh_monomials(fresh_sort, arity.outputs),
+                        )
+                    }
+                }
             }
             Tape::Swap { left, right } => {
                 let mut graph = OpenHypergraph::empty();
