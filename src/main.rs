@@ -1,28 +1,33 @@
-mod context;
+mod command_dot;
 mod command_edge;
 mod command_hypergraph;
-mod command_dot;
-mod hypergraph;
 mod command_typing;
+mod context;
+mod hypergraph;
+mod python_builtin_signatures;
 mod solver;
+mod tape_language;
 mod types;
 mod typing;
-mod tape_language;
 
 use std::error::Error;
 
-use graphviz_rust::printer::{DotPrinter, PrinterContext};
-use open_hypergraphs_dot::Options;
 use command_dot::{generate_dot_with_clusters, to_svg_with_clusters};
-use open_hypergraphs::lax::OpenHypergraph;
 use command_edge::CommandEdge;
-use rustpython_parser::{ast, Parse};
 use command_typing::infer_command_from_suite;
+use graphviz_rust::printer::{DotPrinter, PrinterContext};
+use open_hypergraphs::lax::OpenHypergraph;
+use open_hypergraphs_dot::Options;
+use rustpython_parser::{ast, Parse};
 use solver::{apply_substitution, solve_hypergraph_types};
 
 fn main() -> Result<(), Box<dyn Error>> {
     let input = std::env::args().skip(1).collect::<Vec<_>>().join(" ");
-    let source = if input.is_empty() { "x = 1\ny = x" } else { &input };
+    let source = if input.is_empty() {
+        "x = 1\ny = x"
+    } else {
+        &input
+    };
 
     let suite = match ast::Suite::parse(source, "<input>") {
         Ok(suite) => suite,

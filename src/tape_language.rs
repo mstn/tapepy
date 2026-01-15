@@ -1,7 +1,9 @@
 use open_hypergraphs::lax::{Arrow as _, Monoidal, OpenHypergraph};
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct Generator(pub String);
+pub trait GeneratorShape {
+    fn arity(&self) -> usize;
+    fn coarity(&self) -> usize;
+}
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum Monomial<S> {
@@ -27,21 +29,11 @@ impl<S> Monomial<S> {
         }
     }
 
-    pub fn validate(&self, signature: &MonoidalSignature<S>)
-    where
-        S: PartialEq + std::fmt::Debug,
-    {
+    pub fn len(&self) -> usize {
         match self {
-            Monomial::One => {}
-            Monomial::Atom(name) => {
-                if !signature.has_sort(name) {
-                    panic!("unknown sort `{:?}`", name);
-                }
-            }
-            Monomial::Product(left, right) => {
-                left.validate(signature);
-                right.validate(signature);
-            }
+            Monomial::One => 0,
+            Monomial::Atom(_) => 1,
+            Monomial::Product(left, right) => left.len() + right.len(),
         }
     }
 }
@@ -71,53 +63,30 @@ impl<S> Polynomial<S> {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct GeneratorSignature<S> {
-    pub name: Generator,
-    pub arity: Monomial<S>,
-    pub coarity: Monomial<S>,
-}
-
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct MonoidalSignature<S> {
-    pub sorts: Vec<S>,
-    pub generators: Vec<GeneratorSignature<S>>,
-}
-
-impl<S: PartialEq> MonoidalSignature<S> {
-    pub fn generator(&self, name: &Generator) -> Option<&GeneratorSignature<S>> {
-        self.generators.iter().find(|gen| &gen.name == name)
-    }
-
-    pub fn has_sort(&self, name: &S) -> bool {
-        self.sorts.iter().any(|sort| sort == name)
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum Circuit<S> {
+pub enum Circuit<S, G> {
     Id(S),
     IdOne,
-    Generator(Generator),
+    Generator(G),
     Swap { left: S, right: S },
-    Seq(Box<Circuit<S>>, Box<Circuit<S>>),
-    Product(Box<Circuit<S>>, Box<Circuit<S>>),
+    Seq(Box<Circuit<S, G>>, Box<Circuit<S, G>>),
+    Product(Box<Circuit<S, G>>, Box<Circuit<S, G>>),
     Copy(S),
     Discard(S),
     Join(S),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum Tape<S> {
+pub enum Tape<S, G> {
     Id(Monomial<S>),
     IdZero,
-    EmbedCircuit(Box<Circuit<S>>),
+    EmbedCircuit(Box<Circuit<S, G>>),
     Swap {
         left: Monomial<S>,
         right: Monomial<S>,
     },
-    Seq(Box<Tape<S>>, Box<Tape<S>>),
-    Sum(Box<Tape<S>>, Box<Tape<S>>),
+    Seq(Box<Tape<S, G>>, Box<Tape<S, G>>),
+    Sum(Box<Tape<S, G>>, Box<Tape<S, G>>),
     Discard(Monomial<S>),
     Split(Monomial<S>),
     Create(Monomial<S>),
@@ -125,191 +94,125 @@ pub enum Tape<S> {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct CircuitType<S> {
-    pub domain: Monomial<S>,
-    pub codomain: Monomial<S>,
+pub struct CircuitArity {
+    pub inputs: usize,
+    pub outputs: usize,
 }
 
-impl<S> CircuitType<S> {
-    pub fn new(domain: Monomial<S>, codomain: Monomial<S>) -> Self {
-        Self { domain, codomain }
+impl CircuitArity {
+    pub fn new(inputs: usize, outputs: usize) -> Self {
+        Self { inputs, outputs }
     }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct TapeType<S> {
-    pub domain: Polynomial<S>,
-    pub codomain: Polynomial<S>,
+pub struct TapeArity {
+    pub inputs: usize,
+    pub outputs: usize,
 }
 
-impl<S> TapeType<S> {
-    pub fn new(domain: Polynomial<S>, codomain: Polynomial<S>) -> Self {
-        Self { domain, codomain }
+impl TapeArity {
+    pub fn new(inputs: usize, outputs: usize) -> Self {
+        Self { inputs, outputs }
     }
 }
 
-impl<S: Clone + PartialEq + std::fmt::Debug> Circuit<S> {
-    pub fn typing(&self, signature: &MonoidalSignature<S>) -> CircuitType<S> {
+impl<S, G: GeneratorShape> Circuit<S, G> {
+    pub fn typing(&self) -> CircuitArity {
         match self {
-            Circuit::Id(sort) => {
-                if !signature.has_sort(sort) {
-                    panic!("unknown sort `{:?}`", sort);
-                }
-                let mono = Monomial::atom(sort.clone());
-                CircuitType::new(mono.clone(), mono)
-            }
-            Circuit::IdOne => CircuitType::new(Monomial::one(), Monomial::one()),
-            Circuit::Generator(name) => {
-                let gen = signature
-                    .generator(name)
-                    .unwrap_or_else(|| panic!("unknown generator `{}`", name.0));
-                gen.arity.validate(signature);
-                gen.coarity.validate(signature);
-                CircuitType::new(gen.arity.clone(), gen.coarity.clone())
-            }
-            Circuit::Swap { left, right } => {
-                if !signature.has_sort(left) {
-                    panic!("unknown sort `{:?}`", left);
-                }
-                if !signature.has_sort(right) {
-                    panic!("unknown sort `{:?}`", right);
-                }
-                CircuitType::new(
-                    Monomial::product(Monomial::atom(left.clone()), Monomial::atom(right.clone())),
-                    Monomial::product(Monomial::atom(right.clone()), Monomial::atom(left.clone())),
-                )
-            }
+            Circuit::Id(_) => CircuitArity::new(1, 1),
+            Circuit::IdOne => CircuitArity::new(0, 0),
+            Circuit::Generator(gen) => CircuitArity::new(gen.arity(), gen.coarity()),
+            Circuit::Swap { .. } => CircuitArity::new(2, 2),
             Circuit::Seq(left, right) => {
-                let left_ty = left.typing(signature);
-                let right_ty = right.typing(signature);
-                CircuitType::new(left_ty.domain, right_ty.codomain)
+                let left_ty = left.typing();
+                let right_ty = right.typing();
+                if left_ty.outputs != right_ty.inputs {
+                    panic!(
+                        "sequence arity mismatch: {} vs {}",
+                        left_ty.outputs, right_ty.inputs
+                    );
+                }
+                CircuitArity::new(left_ty.inputs, right_ty.outputs)
             }
             Circuit::Product(left, right) => {
-                let left_ty = left.typing(signature);
-                let right_ty = right.typing(signature);
-                CircuitType::new(
-                    Monomial::product(left_ty.domain, right_ty.domain),
-                    Monomial::product(left_ty.codomain, right_ty.codomain),
-                )
+                let left_ty = left.typing();
+                let right_ty = right.typing();
+                CircuitArity::new(left_ty.inputs + right_ty.inputs, left_ty.outputs + right_ty.outputs)
             }
-            Circuit::Copy(sorts) => {
-                if !signature.has_sort(sorts) {
-                    panic!("unknown sort `{:?}`", sorts);
-                }
-                let mono = Monomial::atom(sorts.clone());
-                CircuitType::new(mono.clone(), Monomial::product(mono.clone(), mono))
-            }
-            Circuit::Discard(sorts) => {
-                if !signature.has_sort(sorts) {
-                    panic!("unknown sort `{:?}`", sorts);
-                }
-                CircuitType::new(Monomial::atom(sorts.clone()), Monomial::one())
-            }
-            Circuit::Join(sorts) => {
-                if !signature.has_sort(sorts) {
-                    panic!("unknown sort `{:?}`", sorts);
-                }
-                let mono = Monomial::atom(sorts.clone());
-                CircuitType::new(Monomial::product(mono.clone(), mono.clone()), mono)
-            }
+            Circuit::Copy(_) => CircuitArity::new(1, 2),
+            Circuit::Discard(_) => CircuitArity::new(1, 0),
+            Circuit::Join(_) => CircuitArity::new(2, 1),
         }
     }
 }
 
-impl<S: Clone + PartialEq + std::fmt::Debug> Tape<S> {
-    pub fn typing(&self, signature: &MonoidalSignature<S>) -> TapeType<S> {
+impl<S, G: GeneratorShape> Tape<S, G> {
+    pub fn typing(&self) -> TapeArity {
         match self {
             Tape::Id(mono) => {
-                mono.validate(signature);
-                let poly = Polynomial::monomial(mono.clone());
-                TapeType::new(poly.clone(), poly)
+                let len = mono.len();
+                TapeArity::new(len, len)
             }
-            Tape::IdZero => TapeType::new(Polynomial::zero(), Polynomial::zero()),
+            Tape::IdZero => TapeArity::new(0, 0),
             Tape::EmbedCircuit(circuit) => {
-                let ty = circuit.typing(signature);
-                TapeType::new(
-                    Polynomial::monomial(ty.domain),
-                    Polynomial::monomial(ty.codomain),
-                )
+                let ty = circuit.typing();
+                TapeArity::new(ty.inputs, ty.outputs)
             }
             Tape::Swap { left, right } => {
-                left.validate(signature);
-                right.validate(signature);
-                TapeType::new(
-                    Polynomial::monomial(Monomial::product(left.clone(), right.clone())),
-                    Polynomial::monomial(Monomial::product(right.clone(), left.clone())),
-                )
+                let inputs = left.len() + right.len();
+                TapeArity::new(inputs, inputs)
             }
             Tape::Seq(left, right) => {
-                let left_ty = left.typing(signature);
-                let right_ty = right.typing(signature);
-                TapeType::new(left_ty.domain, right_ty.codomain)
+                let left_ty = left.typing();
+                let right_ty = right.typing();
+                if left_ty.outputs != right_ty.inputs {
+                    panic!(
+                        "sequence arity mismatch: {} vs {}",
+                        left_ty.outputs, right_ty.inputs
+                    );
+                }
+                TapeArity::new(left_ty.inputs, right_ty.outputs)
             }
             Tape::Sum(left, right) => {
-                let left_ty = left.typing(signature);
-                let right_ty = right.typing(signature);
-                TapeType::new(
-                    Polynomial::sum(left_ty.domain, right_ty.domain),
-                    Polynomial::sum(left_ty.codomain, right_ty.codomain),
-                )
+                let left_ty = left.typing();
+                let right_ty = right.typing();
+                if left_ty.inputs != right_ty.inputs || left_ty.outputs != right_ty.outputs {
+                    panic!(
+                        "sum arity mismatch: {}x{} vs {}x{}",
+                        left_ty.inputs, left_ty.outputs, right_ty.inputs, right_ty.outputs
+                    );
+                }
+                TapeArity::new(left_ty.inputs, left_ty.outputs)
             }
-            Tape::Discard(mono) => {
-                mono.validate(signature);
-                TapeType::new(Polynomial::monomial(mono.clone()), Polynomial::zero())
-            }
+            Tape::Discard(mono) => TapeArity::new(mono.len(), 0),
             Tape::Split(mono) => {
-                mono.validate(signature);
-                let mono_poly = Polynomial::monomial(mono.clone());
-                TapeType::new(
-                    mono_poly.clone(),
-                    Polynomial::sum(mono_poly.clone(), mono_poly),
-                )
+                let len = mono.len();
+                TapeArity::new(len, len)
             }
-            Tape::Create(mono) => {
-                mono.validate(signature);
-                TapeType::new(Polynomial::zero(), Polynomial::monomial(mono.clone()))
-            }
+            Tape::Create(mono) => TapeArity::new(0, mono.len()),
             Tape::Merge(mono) => {
-                mono.validate(signature);
-                let mono_poly = Polynomial::monomial(mono.clone());
-                TapeType::new(
-                    Polynomial::sum(mono_poly.clone(), mono_poly),
-                    Polynomial::monomial(mono.clone()),
-                )
+                let len = mono.len();
+                TapeArity::new(len, len)
             }
         }
     }
 }
 
-impl<S: Clone + PartialEq + std::fmt::Debug> Circuit<S> {
-    pub fn to_hypergraph(&self, signature: &MonoidalSignature<S>) -> OpenHypergraph<S, Generator> {
+impl<S: Clone, G: GeneratorShape + Clone> Circuit<S, G> {
+    pub fn to_hypergraph<F>(&self, fresh_sort: &mut F) -> OpenHypergraph<S, G>
+    where
+        F: FnMut() -> S,
+    {
         match self {
-            Circuit::Id(sort) => {
-                if !signature.has_sort(sort) {
-                    panic!("unknown sort `{:?}`", sort);
-                }
-                OpenHypergraph::identity(vec![sort.clone()])
-            }
+            Circuit::Id(sort) => OpenHypergraph::identity(vec![sort.clone()]),
             Circuit::IdOne => OpenHypergraph::empty(),
-            Circuit::Generator(name) => {
-                let gen = signature
-                    .generator(name)
-                    .unwrap_or_else(|| panic!("unknown generator `{}`", name.0));
-                gen.arity.validate(signature);
-                gen.coarity.validate(signature);
-                OpenHypergraph::singleton(
-                    gen.name.clone(),
-                    monomial_to_sorts(&gen.arity),
-                    monomial_to_sorts(&gen.coarity),
-                )
-            }
+            Circuit::Generator(gen) => OpenHypergraph::singleton(
+                gen.clone(),
+                fresh_sorts(fresh_sort, gen.arity()),
+                fresh_sorts(fresh_sort, gen.coarity()),
+            ),
             Circuit::Swap { left, right } => {
-                if !signature.has_sort(left) {
-                    panic!("unknown sort `{:?}`", left);
-                }
-                if !signature.has_sort(right) {
-                    panic!("unknown sort `{:?}`", right);
-                }
                 let mut graph = OpenHypergraph::empty();
                 let left_id = graph.new_node(left.clone());
                 let right_id = graph.new_node(right.clone());
@@ -318,19 +221,16 @@ impl<S: Clone + PartialEq + std::fmt::Debug> Circuit<S> {
                 graph
             }
             Circuit::Seq(left, right) => {
-                let left_graph = left.to_hypergraph(signature);
-                let right_graph = right.to_hypergraph(signature);
+                let left_graph = left.to_hypergraph(fresh_sort);
+                let right_graph = right.to_hypergraph(fresh_sort);
                 compose_lax_unchecked(&left_graph, &right_graph)
             }
             Circuit::Product(left, right) => {
-                let left_graph = left.to_hypergraph(signature);
-                let right_graph = right.to_hypergraph(signature);
+                let left_graph = left.to_hypergraph(fresh_sort);
+                let right_graph = right.to_hypergraph(fresh_sort);
                 left_graph.tensor(&right_graph)
             }
             Circuit::Copy(sort) => {
-                if !signature.has_sort(sort) {
-                    panic!("unknown sort `{:?}`", sort);
-                }
                 let mut graph = OpenHypergraph::empty();
                 let node = graph.new_node(sort.clone());
                 graph.sources = vec![node];
@@ -338,9 +238,6 @@ impl<S: Clone + PartialEq + std::fmt::Debug> Circuit<S> {
                 graph
             }
             Circuit::Discard(sort) => {
-                if !signature.has_sort(sort) {
-                    panic!("unknown sort `{:?}`", sort);
-                }
                 let mut graph = OpenHypergraph::empty();
                 let node = graph.new_node(sort.clone());
                 graph.sources = vec![node];
@@ -348,9 +245,6 @@ impl<S: Clone + PartialEq + std::fmt::Debug> Circuit<S> {
                 graph
             }
             Circuit::Join(sort) => {
-                if !signature.has_sort(sort) {
-                    panic!("unknown sort `{:?}`", sort);
-                }
                 let mut graph = OpenHypergraph::empty();
                 let node = graph.new_node(sort.clone());
                 graph.sources = vec![node, node];
@@ -361,23 +255,15 @@ impl<S: Clone + PartialEq + std::fmt::Debug> Circuit<S> {
     }
 }
 
-fn monomial_to_sorts<S: Clone>(monomial: &Monomial<S>) -> Vec<S> {
-    match monomial {
-        Monomial::One => Vec::new(),
-        Monomial::Atom(name) => vec![name.clone()],
-        Monomial::Product(left, right) => {
-            let mut left_terms = monomial_to_sorts(left);
-            let mut right_terms = monomial_to_sorts(right);
-            left_terms.append(&mut right_terms);
-            left_terms
-        }
-    }
+fn fresh_sorts<S, F: FnMut() -> S>(fresh_sort: &mut F, count: usize) -> Vec<S> {
+    (0..count).map(|_| fresh_sort()).collect()
 }
 
-fn compose_lax_unchecked<S: Clone + PartialEq>(
-    lhs: &OpenHypergraph<S, Generator>,
-    rhs: &OpenHypergraph<S, Generator>,
-) -> OpenHypergraph<S, Generator> {
+fn compose_lax_unchecked<S: Clone + PartialEq, G: Clone>(
+    lhs: &OpenHypergraph<S, G>,
+    rhs: &OpenHypergraph<S, G>,
+) -> OpenHypergraph<S, G> {
+    // Lax composition: we only check interface lengths here, sort checking is deferred.
     if lhs.targets.len() != rhs.sources.len() {
         panic!(
             "unchecked composition requires same arity, got {} vs {}",
