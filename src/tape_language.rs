@@ -182,6 +182,43 @@ impl<S, G: GeneratorShape> Circuit<S, G> {
     }
 }
 
+impl<S: Clone + PartialEq, G: GeneratorTypes<S>> Circuit<S, G> {
+    pub fn io_types(&self) -> Option<(Vec<S>, Vec<S>)> {
+        match self {
+            Circuit::Id(sort) => Some((vec![sort.clone()], vec![sort.clone()])),
+            Circuit::IdOne => Some((Vec::new(), Vec::new())),
+            Circuit::Generator(gen) => match (gen.input_types(), gen.output_types()) {
+                (Some(inputs), Some(outputs)) => Some((inputs, outputs)),
+                _ => None,
+            },
+            Circuit::Swap { left, right } => Some((
+                vec![left.clone(), right.clone()],
+                vec![right.clone(), left.clone()],
+            )),
+            Circuit::Seq(left, right) => {
+                let (left_in, left_out) = left.io_types()?;
+                let (right_in, right_out) = right.io_types()?;
+                if left_out != right_in {
+                    return None;
+                }
+                Some((left_in, right_out))
+            }
+            Circuit::Product(left, right) => {
+                let (left_in, left_out) = left.io_types()?;
+                let (right_in, right_out) = right.io_types()?;
+                let mut inputs = left_in;
+                inputs.extend(right_in);
+                let mut outputs = left_out;
+                outputs.extend(right_out);
+                Some((inputs, outputs))
+            }
+            Circuit::Copy(sort) => Some((vec![sort.clone()], vec![sort.clone(), sort.clone()])),
+            Circuit::Discard(sort) => Some((vec![sort.clone()], Vec::new())),
+            Circuit::Join(sort) => Some((vec![sort.clone(), sort.clone()], vec![sort.clone()])),
+        }
+    }
+}
+
 impl<S, G: GeneratorShape> Tape<S, G> {
     pub fn typing(&self) -> TapeArity {
         match self {
@@ -308,12 +345,20 @@ impl<S: Clone + PartialEq, G: GeneratorShape + GeneratorTypes<S> + Clone> Tape<S
                     Circuit::IdOne => OpenHypergraph::empty(),
                     _ => {
                         let lifted = lift_circuit(circuit);
-                        let arity = circuit.typing();
-                        OpenHypergraph::singleton(
-                            lifted,
-                            fresh_monomials(fresh_sort, arity.inputs),
-                            fresh_monomials(fresh_sort, arity.outputs),
-                        )
+                        if let Some((inputs, outputs)) = circuit.io_types() {
+                            OpenHypergraph::singleton(
+                                lifted,
+                                inputs.into_iter().map(Monomial::atom).collect(),
+                                outputs.into_iter().map(Monomial::atom).collect(),
+                            )
+                        } else {
+                            let arity = circuit.typing();
+                            OpenHypergraph::singleton(
+                                lifted,
+                                fresh_monomials(fresh_sort, arity.inputs),
+                                fresh_monomials(fresh_sort, arity.outputs),
+                            )
+                        }
                     }
                 }
             }
