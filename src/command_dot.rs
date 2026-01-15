@@ -41,6 +41,10 @@ pub fn generate_dot_with_clusters(
         Id::Plain(String::from("rankdir")),
         Id::Plain(opts.orientation.to_string()),
     )));
+    dot_graph.add_stmt(Stmt::Attribute(Attribute(
+        Id::Plain(String::from("compound")),
+        Id::Plain(String::from("true")),
+    )));
 
     dot_graph.add_stmt(Stmt::Attribute(Attribute(
         Id::Plain(String::from("bgcolor")),
@@ -122,6 +126,7 @@ fn edge_label(edge: &CommandEdge, opts: &Options<TypeExpr, CommandEdge>) -> Stri
         CommandEdge::Atom(_) => (opts.edge_label)(edge),
         CommandEdge::Convolution(_) => "Convolution".to_string(),
         CommandEdge::Kleene(_) => "Kleene".to_string(),
+        CommandEdge::Embedded(_) => "Embed".to_string(),
     }
 }
 
@@ -205,11 +210,15 @@ fn generate_edge_stmts(
                 }));
             }
             CommandEdge::Convolution(children) => {
+                let children = children.as_slice();
                 for (src_idx, &node_id) in hyperedge.sources.iter().enumerate() {
                     let label = (opts.node_label)(&graph.hypergraph.nodes[node_id.0]);
                     let label = escape_dot_label(&label);
                     stmts.push(Stmt::Node(Node {
-                        id: NodeId(Id::Plain(format!("{}e_{}_split_n_{}", prefix, i, src_idx)), None),
+                        id: NodeId(
+                            Id::Plain(format!("{}e_{}_split_n_{}", prefix, i, src_idx)),
+                            None,
+                        ),
                         attributes: vec![
                             Attribute(
                                 Id::Plain(String::from("shape")),
@@ -226,7 +235,10 @@ fn generate_edge_stmts(
                     let label = (opts.node_label)(&graph.hypergraph.nodes[node_id.0]);
                     let label = escape_dot_label(&label);
                     stmts.push(Stmt::Node(Node {
-                        id: NodeId(Id::Plain(format!("{}e_{}_join_n_{}", prefix, i, tgt_idx)), None),
+                        id: NodeId(
+                            Id::Plain(format!("{}e_{}_join_n_{}", prefix, i, tgt_idx)),
+                            None,
+                        ),
                         attributes: vec![
                             Attribute(
                                 Id::Plain(String::from("shape")),
@@ -240,12 +252,18 @@ fn generate_edge_stmts(
                     }));
                 }
             }
+            CommandEdge::Embedded(child) => {
+                let _child = child;
+            }
             CommandEdge::Kleene(_) => {
                 for (src_idx, &node_id) in hyperedge.sources.iter().enumerate() {
                     let label = (opts.node_label)(&graph.hypergraph.nodes[node_id.0]);
                     let label = escape_dot_label(&label);
                     stmts.push(Stmt::Node(Node {
-                        id: NodeId(Id::Plain(format!("{}e_{}_split_n_{}", prefix, i, src_idx)), None),
+                        id: NodeId(
+                            Id::Plain(format!("{}e_{}_split_n_{}", prefix, i, src_idx)),
+                            None,
+                        ),
                         attributes: vec![
                             Attribute(
                                 Id::Plain(String::from("shape")),
@@ -262,7 +280,10 @@ fn generate_edge_stmts(
                     let label = (opts.node_label)(&graph.hypergraph.nodes[node_id.0]);
                     let label = escape_dot_label(&label);
                     stmts.push(Stmt::Node(Node {
-                        id: NodeId(Id::Plain(format!("{}e_{}_join_n_{}", prefix, i, tgt_idx)), None),
+                        id: NodeId(
+                            Id::Plain(format!("{}e_{}_join_n_{}", prefix, i, tgt_idx)),
+                            None,
+                        ),
                         attributes: vec![
                             Attribute(
                                 Id::Plain(String::from("shape")),
@@ -492,7 +513,7 @@ fn generate_edge_clusters(
             CommandEdge::Convolution(children) => {
                 let cluster_id = format!("cluster_{}e_{}", prefix, edge_idx);
                 let mut cluster = Subgraph {
-                    id: Id::Plain(cluster_id),
+                    id: Id::Plain(cluster_id.clone()),
                     stmts: vec![
                         Stmt::Attribute(Attribute(
                             Id::Plain(String::from("label")),
@@ -645,10 +666,108 @@ fn generate_edge_clusters(
 
                 stmts.push(Stmt::Subgraph(cluster));
             }
+            CommandEdge::Embedded(child) => {
+                let cluster_id = format!("cluster_{}e_{}", prefix, edge_idx);
+                let mut cluster = Subgraph {
+                    id: Id::Plain(cluster_id.clone()),
+                    stmts: vec![
+                        Stmt::Attribute(Attribute(
+                            Id::Plain(String::from("label")),
+                            Id::Plain(String::from("\"\"")),
+                        )),
+                        Stmt::Attribute(Attribute(
+                            Id::Plain(String::from("color")),
+                            Id::Plain(format!("\"{}\"", theme.color.clone())),
+                        )),
+                        Stmt::Attribute(Attribute(
+                            Id::Plain(String::from("fontcolor")),
+                            Id::Plain(format!("\"{}\"", theme.fontcolor.clone())),
+                        )),
+                        Stmt::Attribute(Attribute(
+                            Id::Plain(String::from("style")),
+                            Id::Plain(String::from("rounded")),
+                        )),
+                    ],
+                };
+
+                let parent_sources = graph.hypergraph.adjacency[edge_idx]
+                    .sources
+                    .iter()
+                    .map(|id| graph.hypergraph.nodes[id.0].clone())
+                    .collect::<Vec<_>>();
+                let parent_targets = graph.hypergraph.adjacency[edge_idx]
+                    .targets
+                    .iter()
+                    .map(|id| graph.hypergraph.nodes[id.0].clone())
+                    .collect::<Vec<_>>();
+                let child = strictify(child);
+                let child = normalize_interface_labels(child, &parent_sources, &parent_targets);
+                let child_prefix = format!("{}e_{}_c0_", prefix, edge_idx);
+                for (j, &child_source) in child.sources.iter().enumerate() {
+                    let parent_node = graph.hypergraph.adjacency[edge_idx].sources[j];
+                    let edge = Edge {
+                        ty: EdgeTy::Pair(
+                            Vertex::N(NodeId(
+                                Id::Plain(format!("{}n_{}", prefix, parent_node.0)),
+                                None,
+                            )),
+                            Vertex::N(NodeId(
+                                Id::Plain(format!("{}n_{}", child_prefix, child_source.0)),
+                                None,
+                            )),
+                        ),
+                        attributes: vec![
+                            Attribute(
+                                Id::Plain(String::from("lhead")),
+                                Id::Plain(cluster_id.clone()),
+                            ),
+                        ],
+                    };
+                    stmts.push(Stmt::Edge(edge));
+                }
+                for (j, &child_target) in child.targets.iter().enumerate() {
+                    let parent_node = graph.hypergraph.adjacency[edge_idx].targets[j];
+                    let edge = Edge {
+                        ty: EdgeTy::Pair(
+                            Vertex::N(NodeId(
+                                Id::Plain(format!("{}n_{}", child_prefix, child_target.0)),
+                                None,
+                            )),
+                            Vertex::N(NodeId(
+                                Id::Plain(format!("{}n_{}", prefix, parent_node.0)),
+                                None,
+                            )),
+                        ),
+                        attributes: vec![
+                            Attribute(
+                                Id::Plain(String::from("ltail")),
+                                Id::Plain(cluster_id.clone()),
+                            ),
+                        ],
+                    };
+                    stmts.push(Stmt::Edge(edge));
+                }
+                for stmt in generate_node_stmts(&child, opts, &child_prefix) {
+                    cluster.add_stmt(stmt);
+                }
+                for stmt in generate_edge_stmts(&child, opts, &child_prefix) {
+                    cluster.add_stmt(stmt);
+                }
+                for stmt in generate_interface_stmts(&child, &child_prefix) {
+                    cluster.add_stmt(stmt);
+                }
+                for stmt in generate_connection_stmts(&child, &child_prefix) {
+                    cluster.add_stmt(stmt);
+                }
+                for stmt in generate_quotient_stmts(&child, &child_prefix) {
+                    cluster.add_stmt(stmt);
+                }
+                stmts.push(Stmt::Subgraph(cluster));
+            }
             CommandEdge::Kleene(child) => {
                 let cluster_id = format!("cluster_{}e_{}", prefix, edge_idx);
                 let mut cluster = Subgraph {
-                    id: Id::Plain(cluster_id),
+                    id: Id::Plain(cluster_id.clone()),
                     stmts: vec![
                         Stmt::Attribute(Attribute(
                             Id::Plain(String::from("label")),

@@ -10,6 +10,7 @@ pub enum CommandEdge {
     Atom(String),
     Convolution(Vec<OpenHypergraph<TypeExpr, CommandEdge>>),
     Kleene(Box<OpenHypergraph<TypeExpr, CommandEdge>>),
+    Embedded(Box<OpenHypergraph<TypeExpr, CommandEdge>>),
 }
 
 impl fmt::Display for CommandEdge {
@@ -28,6 +29,13 @@ impl fmt::Display for CommandEdge {
             }
             CommandEdge::Kleene(child) => {
                 writeln!(f, "Kleene")?;
+                for line in format_hypergraph(child).lines() {
+                    writeln!(f, "  {}", line)?;
+                }
+                Ok(())
+            }
+            CommandEdge::Embedded(child) => {
+                writeln!(f, "Embedded")?;
                 for line in format_hypergraph(child).lines() {
                     writeln!(f, "  {}", line)?;
                 }

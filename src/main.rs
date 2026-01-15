@@ -13,6 +13,7 @@ mod tape_language;
 mod types;
 mod typing;
 
+use std::cell::Cell;
 use std::error::Error;
 
 use command_dot::{generate_dot_with_clusters, to_svg_with_clusters};
@@ -49,10 +50,23 @@ fn main() -> Result<(), Box<dyn Error>> {
             let id = next_id;
             next_id += 1;
             types::TypeExpr::Var(types::TypeVar(id))
-        })
-        .map_edges(|edge| CommandEdge::Atom(edge.to_string()));
+        });
 
-    let visual_graph = term.map_nodes(|mono| types::TypeExpr::Named(format!("{}", mono)));
+    let next_id = Cell::new(0usize);
+    let visual_graph = term
+        .map_nodes(|mono| types::TypeExpr::Named(format!("{}", mono)))
+        .map_edges(|edge| {
+            let mut fresh = || {
+                let id = next_id.get();
+                next_id.set(id + 1);
+                tape_language::Monomial::atom(types::TypeExpr::Var(types::TypeVar(id)))
+            };
+            let child = edge.to_hypergraph(&mut fresh);
+            let child = child
+                .map_nodes(|mono| types::TypeExpr::Named(format!("{}", mono)))
+                .map_edges(|gen| CommandEdge::Atom(gen.to_string()));
+            CommandEdge::Embedded(Box::new(child))
+        });
 
     let opts = Options {
         node_label: Box::new(|t: &types::TypeExpr| t.to_string()),
@@ -76,15 +90,15 @@ fn write_svg_with_fallback(
 ) -> Result<(), Box<dyn Error>> {
     let svg_path = format!("{}.svg", prefix);
     let dot_path = format!("{}.dot", prefix);
+    let dot_graph = generate_dot_with_clusters(graph, opts);
+    let mut ctx = PrinterContext::default();
+    let dot_string = dot_graph.print(&mut ctx);
+    std::fs::write(&dot_path, dot_string)?;
     match to_svg_with_clusters(graph, opts) {
         Ok(svg) => {
             std::fs::write(svg_path, svg)?;
         }
         Err(err) => {
-            let dot_graph = generate_dot_with_clusters(graph, opts);
-            let mut ctx = PrinterContext::default();
-            let dot_string = dot_graph.print(&mut ctx);
-            std::fs::write(dot_path, dot_string)?;
             eprintln!(
                 "SVG rendering failed ({}). Wrote DOT output to {}.dot.",
                 err, prefix
