@@ -112,7 +112,10 @@ pub enum Tape<S> {
     Id(Monomial<S>),
     IdZero,
     EmbedCircuit(Box<Circuit<S>>),
-    Swap { left: Monomial<S>, right: Monomial<S> },
+    Swap {
+        left: Monomial<S>,
+        right: Monomial<S>,
+    },
     Seq(Box<Tape<S>>, Box<Tape<S>>),
     Sum(Box<Tape<S>>, Box<Tape<S>>),
     Discard(Monomial<S>),
@@ -279,10 +282,7 @@ impl<S: Clone + PartialEq + std::fmt::Debug> Tape<S> {
 }
 
 impl<S: Clone + PartialEq + std::fmt::Debug> Circuit<S> {
-    pub fn to_hypergraph(
-        &self,
-        signature: &MonoidalSignature<S>,
-    ) -> OpenHypergraph<S, Generator> {
+    pub fn to_hypergraph(&self, signature: &MonoidalSignature<S>) -> OpenHypergraph<S, Generator> {
         match self {
             Circuit::Id(sort) => {
                 if !signature.has_sort(sort) {
@@ -374,7 +374,7 @@ fn monomial_to_sorts<S: Clone>(monomial: &Monomial<S>) -> Vec<S> {
     }
 }
 
-fn compose_lax_unchecked<S: Clone>(
+fn compose_lax_unchecked<S: Clone + PartialEq>(
     lhs: &OpenHypergraph<S, Generator>,
     rhs: &OpenHypergraph<S, Generator>,
 ) -> OpenHypergraph<S, Generator> {
