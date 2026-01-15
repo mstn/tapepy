@@ -164,6 +164,15 @@ pub fn circuit_from_expr(tree: &DeductionTree) -> Circuit<TypeExpr, ExprGenerato
     }
 }
 
+pub fn circuit_from_expr_with_context(
+    tree: &DeductionTree,
+    context_entries: &[(String, TypeExpr)],
+) -> Circuit<TypeExpr, ExprGenerator> {
+    let wiring = wiring_circuit_for_expression(tree, context_entries);
+    let expr = circuit_from_expr(tree);
+    Circuit::Seq(Box::new(wiring), Box::new(expr))
+}
+
 pub fn hypergraph_from_circuit(
     circuit: &Circuit<TypeExpr, ExprGenerator>,
 ) -> OpenHypergraph<TypeExpr, ExprGenerator> {
@@ -189,6 +198,192 @@ fn assert_child_count(tree: &DeductionTree, expected: usize, label: &str) {
     if actual != expected {
         panic!("{} expects {} children, got {}", label, expected, actual);
     }
+}
+
+fn expr_input_vars(tree: &DeductionTree) -> Vec<String> {
+    match tree.form() {
+        ExprForm::Var(name) => vec![name.clone()],
+        ExprForm::Const(_) => Vec::new(),
+        ExprForm::UnaryOp(_) => tree
+            .children()
+            .get(0)
+            .map(expr_input_vars)
+            .unwrap_or_default(),
+        ExprForm::Call(_) | ExprForm::BoolOp(_) => {
+            let mut vars = Vec::new();
+            for child in tree.children() {
+                vars.extend(expr_input_vars(child));
+            }
+            vars
+        }
+        ExprForm::BinOp(_) | ExprForm::Compare(_) => {
+            if tree.children().len() != 2 {
+                return Vec::new();
+            }
+            let mut left = expr_input_vars(&tree.children()[0]);
+            let mut right = expr_input_vars(&tree.children()[1]);
+            left.append(&mut right);
+            left
+        }
+    }
+}
+
+fn wiring_circuit_for_expression(
+    tree: &DeductionTree,
+    context_entries: &[(String, TypeExpr)],
+) -> Circuit<TypeExpr, ExprGenerator> {
+    let input_vars = expr_input_vars(tree);
+    let mut counts = Vec::with_capacity(context_entries.len());
+    for (name, _) in context_entries {
+        let count = input_vars.iter().filter(|var| *var == name).count();
+        counts.push(count);
+    }
+
+    let mut var_circuits = Vec::with_capacity(context_entries.len());
+    for ((_, ty), count) in context_entries.iter().zip(counts.iter().copied()) {
+        var_circuits.push(copy_n(ty.clone(), count));
+    }
+    let grouped = product_many(var_circuits);
+
+    let grouped_types = grouped_types(context_entries, &counts);
+    let permutation = permutation_for_inputs(context_entries, &input_vars, &counts);
+    if permutation.is_identity() {
+        grouped
+    } else {
+        let perm = permute_circuit(&grouped_types, &permutation);
+        Circuit::Seq(Box::new(grouped), Box::new(perm))
+    }
+}
+
+fn grouped_types(
+    context_entries: &[(String, TypeExpr)],
+    counts: &[usize],
+) -> Vec<TypeExpr> {
+    let mut types = Vec::new();
+    for ((_, ty), count) in context_entries.iter().zip(counts.iter().copied()) {
+        for _ in 0..count {
+            types.push(ty.clone());
+        }
+    }
+    types
+}
+
+fn permutation_for_inputs(
+    context_entries: &[(String, TypeExpr)],
+    input_vars: &[String],
+    counts: &[usize],
+) -> Permutation {
+    let mut offsets = Vec::with_capacity(counts.len());
+    let mut running = 0;
+    for count in counts {
+        offsets.push(running);
+        running += *count;
+    }
+
+    let mut seen = vec![0usize; counts.len()];
+    let mut permutation = Vec::with_capacity(input_vars.len());
+    for name in input_vars {
+        let idx = context_entries
+            .iter()
+            .position(|(var, _)| var == name)
+            .unwrap_or_else(|| panic!("variable `{}` not in context", name));
+        let offset = offsets[idx];
+        let use_idx = offset + seen[idx];
+        seen[idx] += 1;
+        permutation.push(use_idx);
+    }
+    Permutation(permutation)
+}
+
+fn copy_n(ty: TypeExpr, count: usize) -> Circuit<TypeExpr, ExprGenerator> {
+    match count {
+        0 => Circuit::Discard(ty),
+        1 => Circuit::Id(ty),
+        2 => Circuit::Copy(ty),
+        _ => {
+            let left = Circuit::Id(ty.clone());
+            let right = copy_n(ty.clone(), count - 1);
+            let prod = Circuit::Product(Box::new(left), Box::new(right));
+            Circuit::Seq(Box::new(Circuit::Copy(ty)), Box::new(prod))
+        }
+    }
+}
+
+fn permute_circuit(
+    types: &[TypeExpr],
+    permutation: &Permutation,
+) -> Circuit<TypeExpr, ExprGenerator> {
+    let mut current: Vec<usize> = (0..types.len()).collect();
+    let mut current_types: Vec<TypeExpr> = types.to_vec();
+    let mut swaps = Vec::new();
+
+    for target_idx in 0..permutation.0.len() {
+        let desired = permutation.0[target_idx];
+        let mut pos = current
+            .iter()
+            .position(|idx| *idx == desired)
+            .unwrap_or_else(|| panic!("permutation missing index {}", desired));
+        while pos > target_idx {
+            swaps.push(swap_adjacent(&current_types, pos - 1));
+            current.swap(pos - 1, pos);
+            current_types.swap(pos - 1, pos);
+            pos -= 1;
+        }
+    }
+
+    if swaps.is_empty() {
+        identity_for_types(types)
+    } else {
+        swaps.into_iter().fold(identity_for_types(types), |acc, swap| {
+            Circuit::Seq(Box::new(acc), Box::new(swap))
+        })
+    }
+}
+
+fn identity_for_types(types: &[TypeExpr]) -> Circuit<TypeExpr, ExprGenerator> {
+    if types.is_empty() {
+        return Circuit::IdOne;
+    }
+    let mut circuits = Vec::with_capacity(types.len());
+    for ty in types {
+        circuits.push(Circuit::Id(ty.clone()));
+    }
+    product_many(circuits)
+}
+
+fn swap_adjacent(types: &[TypeExpr], index: usize) -> Circuit<TypeExpr, ExprGenerator> {
+    let left = identity_for_types(&types[..index]);
+    let mid = Circuit::Swap {
+        left: types[index].clone(),
+        right: types[index + 1].clone(),
+    };
+    let right = identity_for_types(&types[index + 2..]);
+
+    match (left, right) {
+        (Circuit::IdOne, Circuit::IdOne) => mid,
+        (Circuit::IdOne, right) => Circuit::Product(Box::new(mid), Box::new(right)),
+        (left, Circuit::IdOne) => Circuit::Product(Box::new(left), Box::new(mid)),
+        (left, right) => {
+            let mid_right = Circuit::Product(Box::new(mid), Box::new(right));
+            Circuit::Product(Box::new(left), Box::new(mid_right))
+        }
+    }
+}
+
+struct Permutation(Vec<usize>);
+
+impl Permutation {
+    fn is_identity(&self) -> bool {
+        self.0.iter().enumerate().all(|(idx, val)| idx == *val)
+    }
+}
+
+fn lookup_var_type(name: &str, context_entries: &[(String, TypeExpr)]) -> TypeExpr {
+    context_entries
+        .iter()
+        .find(|(var, _)| var == name)
+        .map(|(_, ty)| ty.clone())
+        .unwrap_or_else(|| panic!("variable `{}` not in context", name))
 }
 
 static NEXT_TYPE_VAR: AtomicUsize = AtomicUsize::new(0);

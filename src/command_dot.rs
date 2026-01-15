@@ -166,8 +166,9 @@ fn generate_edge_stmts(
         let hyperedge = &graph.hypergraph.adjacency[i];
         match &graph.hypergraph.edges[i] {
             CommandEdge::Atom(_) => {
-                let label = edge_label(&graph.hypergraph.edges[i], opts);
-                let label = escape_dot_label(&label);
+                let raw_label = edge_label(&graph.hypergraph.edges[i], opts);
+                let label = escape_dot_label(&raw_label);
+                let hide_node = raw_label == "context";
 
                 let mut source_ports = String::new();
                 for j in 0..hyperedge.sources.len() {
@@ -198,15 +199,22 @@ fn generate_edge_stmts(
                     )
                 };
 
+                let mut attributes = vec![
+                    Attribute(Id::Plain(String::from("label")), Id::Plain(record_label)),
+                    Attribute(
+                        Id::Plain(String::from("shape")),
+                        Id::Plain(String::from("record")),
+                    ),
+                ];
+                if hide_node {
+                    attributes.push(Attribute(
+                        Id::Plain(String::from("style")),
+                        Id::Plain(String::from("invis")),
+                    ));
+                }
                 stmts.push(Stmt::Node(Node {
                     id: NodeId(Id::Plain(format!("{}e_{}", prefix, i)), None),
-                    attributes: vec![
-                        Attribute(Id::Plain(String::from("label")), Id::Plain(record_label)),
-                        Attribute(
-                            Id::Plain(String::from("shape")),
-                            Id::Plain(String::from("record")),
-                        ),
-                    ],
+                    attributes,
                 }));
             }
             CommandEdge::Convolution(children) => {
@@ -668,8 +676,9 @@ fn generate_edge_clusters(
             }
             CommandEdge::Embedded(child) => {
                 let cluster_id = format!("cluster_{}e_{}", prefix, edge_idx);
+                let cluster_id_for_edges = cluster_id.clone();
                 let mut cluster = Subgraph {
-                    id: Id::Plain(cluster_id.clone()),
+                    id: Id::Plain(cluster_id),
                     stmts: vec![
                         Stmt::Attribute(Attribute(
                             Id::Plain(String::from("label")),
@@ -719,7 +728,7 @@ fn generate_edge_clusters(
                         attributes: vec![
                             Attribute(
                                 Id::Plain(String::from("lhead")),
-                                Id::Plain(cluster_id.clone()),
+                                Id::Plain(cluster_id_for_edges.clone()),
                             ),
                         ],
                     };
@@ -741,7 +750,7 @@ fn generate_edge_clusters(
                         attributes: vec![
                             Attribute(
                                 Id::Plain(String::from("ltail")),
-                                Id::Plain(cluster_id.clone()),
+                                Id::Plain(cluster_id_for_edges.clone()),
                             ),
                         ],
                     };
