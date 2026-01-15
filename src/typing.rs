@@ -237,15 +237,9 @@ fn infer_predicate_expr(expr: &Expr, context: &Context) -> DeductionTree {
     match expr {
         Expr::UnaryOp(unary) => match unary.op {
             UnaryOp::Not => {
-                let child = infer_predicate_expr(&unary.operand, context);
-                if child.judgment.ty != TypeExpr::Unit {
-                    panic!(
-                        "type error: predicate not expects 1, got {}",
-                        child.judgment.ty
-                    );
-                }
+                let child = infer_predicate_relation(&unary.operand, context);
                 make_node(
-                    "PredNot",
+                    "PredBar",
                     expr,
                     context,
                     TypeExpr::Unit,
@@ -293,6 +287,14 @@ fn infer_predicate_expr(expr: &Expr, context: &Context) -> DeductionTree {
             _ => panic!("unsupported predicate literal: {:?}", c.value),
         },
         _ => panic!("unsupported predicate expression: {:?}", expr),
+    }
+}
+
+fn infer_predicate_relation(expr: &Expr, context: &Context) -> DeductionTree {
+    match expr {
+        Expr::Call(call) => infer_predicate_call(expr, call, context),
+        Expr::Compare(compare) => infer_predicate_compare(expr, compare, context),
+        _ => panic!("predicate relation expects a call or comparison"),
     }
 }
 
