@@ -3,7 +3,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 
 use open_hypergraphs::lax::OpenHypergraph;
 
-use crate::tape_language::{Circuit, GeneratorShape};
+use crate::tape_language::{Circuit, GeneratorShape, GeneratorTypes, Monomial};
 use crate::types::{TypeExpr, TypeVar};
 use crate::typing::{DeductionTree, ExprForm};
 
@@ -12,6 +12,8 @@ pub struct ExprGenerator {
     pub name: String,
     pub arity: usize,
     pub coarity: usize,
+    pub input_types: Option<Vec<TypeExpr>>,
+    pub output_types: Option<Vec<TypeExpr>>,
 }
 
 impl ExprGenerator {
@@ -20,6 +22,24 @@ impl ExprGenerator {
             name: name.into(),
             arity,
             coarity,
+            input_types: None,
+            output_types: None,
+        }
+    }
+
+    pub fn typed(
+        name: impl Into<String>,
+        input_types: Vec<TypeExpr>,
+        output_types: Vec<TypeExpr>,
+    ) -> Self {
+        let arity = input_types.len();
+        let coarity = output_types.len();
+        Self {
+            name: name.into(),
+            arity,
+            coarity,
+            input_types: Some(input_types),
+            output_types: Some(output_types),
         }
     }
 }
@@ -40,16 +60,48 @@ impl GeneratorShape for ExprGenerator {
     }
 }
 
+impl GeneratorTypes<TypeExpr> for ExprGenerator {
+    fn input_types(&self) -> Option<Vec<TypeExpr>> {
+        self.input_types.clone()
+    }
+
+    fn output_types(&self) -> Option<Vec<TypeExpr>> {
+        self.output_types.clone()
+    }
+}
+
+impl GeneratorTypes<Monomial<TypeExpr>> for ExprGenerator {
+    fn input_types(&self) -> Option<Vec<Monomial<TypeExpr>>> {
+        self.input_types
+            .as_ref()
+            .map(|inputs| inputs.iter().cloned().map(Monomial::atom).collect())
+    }
+
+    fn output_types(&self) -> Option<Vec<Monomial<TypeExpr>>> {
+        self.output_types
+            .as_ref()
+            .map(|outputs| outputs.iter().cloned().map(Monomial::atom).collect())
+    }
+}
+
 /// Builds a circuit skeleton from an expression derivation tree.
 /// Note: this ignores context wiring and variable sharing; composition is length-only.
 pub fn circuit_from_expr(tree: &DeductionTree) -> Circuit<TypeExpr, ExprGenerator> {
     match tree.form() {
         ExprForm::Var(_) => Circuit::Id(tree.judgment().ty().clone()),
-        ExprForm::Const(label) => Circuit::Generator(ExprGenerator::new(label, 0, 1)),
+        ExprForm::Const(label) => Circuit::Generator(ExprGenerator::typed(
+            label,
+            Vec::new(),
+            vec![tree.judgment().ty().clone()],
+        )),
         ExprForm::UnaryOp(op) => {
             assert_child_count(tree, 1, "UnaryOp");
             let child = circuit_from_expr(&tree.children()[0]);
-            let gen = Circuit::Generator(ExprGenerator::new(op, 1, 1));
+            let gen = Circuit::Generator(ExprGenerator::typed(
+                op,
+                vec![tree.children()[0].judgment().ty().clone()],
+                vec![tree.judgment().ty().clone()],
+            ));
             Circuit::Seq(Box::new(child), Box::new(gen))
         }
         ExprForm::BinOp(op) => {
@@ -57,12 +109,26 @@ pub fn circuit_from_expr(tree: &DeductionTree) -> Circuit<TypeExpr, ExprGenerato
             let left = circuit_from_expr(&tree.children()[0]);
             let right = circuit_from_expr(&tree.children()[1]);
             let inputs = Circuit::Product(Box::new(left), Box::new(right));
-            let gen = Circuit::Generator(ExprGenerator::new(op, 2, 1));
+            let gen = Circuit::Generator(ExprGenerator::typed(
+                op,
+                vec![
+                    tree.children()[0].judgment().ty().clone(),
+                    tree.children()[1].judgment().ty().clone(),
+                ],
+                vec![tree.judgment().ty().clone()],
+            ));
             Circuit::Seq(Box::new(inputs), Box::new(gen))
         }
         ExprForm::BoolOp(op) => {
             let inputs = product_many(tree.children().iter().map(circuit_from_expr).collect());
-            let gen = Circuit::Generator(ExprGenerator::new(op, tree.children().len(), 1));
+            let gen = Circuit::Generator(ExprGenerator::typed(
+                op,
+                tree.children()
+                    .iter()
+                    .map(|child| child.judgment().ty().clone())
+                    .collect(),
+                vec![tree.judgment().ty().clone()],
+            ));
             Circuit::Seq(Box::new(inputs), Box::new(gen))
         }
         ExprForm::Compare(op) => {
@@ -70,7 +136,14 @@ pub fn circuit_from_expr(tree: &DeductionTree) -> Circuit<TypeExpr, ExprGenerato
             let left = circuit_from_expr(&tree.children()[0]);
             let right = circuit_from_expr(&tree.children()[1]);
             let inputs = Circuit::Product(Box::new(left), Box::new(right));
-            let gen = Circuit::Generator(ExprGenerator::new(op, 2, 1));
+            let gen = Circuit::Generator(ExprGenerator::typed(
+                op,
+                vec![
+                    tree.children()[0].judgment().ty().clone(),
+                    tree.children()[1].judgment().ty().clone(),
+                ],
+                vec![tree.judgment().ty().clone()],
+            ));
             Circuit::Seq(Box::new(inputs), Box::new(gen))
         }
         ExprForm::Call(name) => {
@@ -78,7 +151,14 @@ pub fn circuit_from_expr(tree: &DeductionTree) -> Circuit<TypeExpr, ExprGenerato
                 panic!("Call expects at least 1 child");
             }
             let inputs = product_many(tree.children().iter().map(circuit_from_expr).collect());
-            let gen = Circuit::Generator(ExprGenerator::new(name, tree.children().len(), 1));
+            let gen = Circuit::Generator(ExprGenerator::typed(
+                name,
+                tree.children()
+                    .iter()
+                    .map(|child| child.judgment().ty().clone())
+                    .collect(),
+                vec![tree.judgment().ty().clone()],
+            ));
             Circuit::Seq(Box::new(inputs), Box::new(gen))
         }
     }

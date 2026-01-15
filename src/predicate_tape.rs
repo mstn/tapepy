@@ -94,10 +94,20 @@ fn circuit_from_relation(
     negated: bool,
 ) -> Circuit<TypeExpr, ExprGenerator> {
     let inputs = product_many(args.iter().map(|arg| circuit_from_expr(arg)).collect());
-    let op = Circuit::Generator(ExprGenerator::new(name, args.len(), 1));
+    let op = Circuit::Generator(ExprGenerator::typed(
+        name,
+        args.iter()
+            .map(|arg| arg.judgment().ty().clone())
+            .collect(),
+        vec![TypeExpr::Bool],
+    ));
     let base = Circuit::Seq(Box::new(inputs), Box::new(op));
     if negated {
-        let not = Circuit::Generator(ExprGenerator::new("not", 1, 1));
+        let not = Circuit::Generator(ExprGenerator::typed(
+            "not",
+            vec![TypeExpr::Bool],
+            vec![TypeExpr::Bool],
+        ));
         Circuit::Seq(Box::new(base), Box::new(not))
     } else {
         base

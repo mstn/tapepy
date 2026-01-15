@@ -6,6 +6,11 @@ pub trait GeneratorShape {
     fn coarity(&self) -> usize;
 }
 
+pub trait GeneratorTypes<S> {
+    fn input_types(&self) -> Option<Vec<S>>;
+    fn output_types(&self) -> Option<Vec<S>>;
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum Monomial<S> {
     One,
@@ -229,7 +234,7 @@ impl<S, G: GeneratorShape> Tape<S, G> {
     }
 }
 
-impl<S: Clone + PartialEq, G: GeneratorShape + Clone> Circuit<S, G> {
+impl<S: Clone + PartialEq, G: GeneratorShape + GeneratorTypes<S> + Clone> Circuit<S, G> {
     pub fn to_hypergraph<F>(&self, fresh_sort: &mut F) -> OpenHypergraph<S, G>
     where
         F: FnMut() -> S,
@@ -239,8 +244,10 @@ impl<S: Clone + PartialEq, G: GeneratorShape + Clone> Circuit<S, G> {
             Circuit::IdOne => OpenHypergraph::empty(),
             Circuit::Generator(gen) => OpenHypergraph::singleton(
                 gen.clone(),
-                fresh_sorts(fresh_sort, gen.arity()),
-                fresh_sorts(fresh_sort, gen.coarity()),
+                gen.input_types()
+                    .unwrap_or_else(|| fresh_sorts(fresh_sort, gen.arity())),
+                gen.output_types()
+                    .unwrap_or_else(|| fresh_sorts(fresh_sort, gen.coarity())),
             ),
             Circuit::Swap { left, right } => {
                 let mut graph = OpenHypergraph::empty();
@@ -285,7 +292,7 @@ impl<S: Clone + PartialEq, G: GeneratorShape + Clone> Circuit<S, G> {
     }
 }
 
-impl<S: Clone + PartialEq, G: GeneratorShape + Clone> Tape<S, G> {
+impl<S: Clone + PartialEq, G: GeneratorShape + GeneratorTypes<S> + Clone> Tape<S, G> {
     pub fn to_hypergraph(
         &self,
         fresh_sort: &mut impl FnMut() -> S,

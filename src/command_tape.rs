@@ -62,8 +62,10 @@ fn if_tape(tree: &CommandDerivationTree) -> Tape<TypeExpr, ExprGenerator> {
     let then_tape = tape_from_command(then_branch);
     let else_tape = tape_from_command(else_branch);
 
-    let not_gate = Tape::EmbedCircuit(Box::new(Circuit::Generator(ExprGenerator::new(
-        "not", 1, 1,
+    let not_gate = Tape::EmbedCircuit(Box::new(Circuit::Generator(ExprGenerator::typed(
+        "not",
+        vec![TypeExpr::Bool],
+        vec![TypeExpr::Bool],
     ))));
     let not_pred = Tape::Seq(Box::new(pred_tape.clone()), Box::new(not_gate));
 
