@@ -1,5 +1,5 @@
 use crate::command_typing::{CommandChild, CommandDerivationTree, CommandForm};
-use crate::expression_circuit::{circuit_from_expr_with_context, ExprGenerator};
+use crate::expression_circuit::{self, circuit_from_expr_with_context, ExprGenerator};
 use crate::predicate_tape::tape_from_predicate;
 use crate::tape_language::{Circuit, Monomial, Tape};
 use crate::types::TypeExpr;
@@ -23,34 +23,48 @@ pub fn tape_from_command(tree: &CommandDerivationTree) -> Tape<TypeExpr, ExprGen
 }
 
 fn assignment_tape(tree: &CommandDerivationTree, name: &str) -> Tape<TypeExpr, ExprGenerator> {
-    let expr = tree
-        .children()
-        .iter()
-        .find_map(|child| match child {
-            CommandChild::Expression(expr) => Some(expr),
-            _ => None,
-        })
-        .unwrap_or_else(|| panic!("assignment expects expression child"));
-    let input_entries = expr.judgment().context().entries();
-    let output_entries = tree.judgment().context().entries();
-    let input_index = input_entries
+    let context_entries = tree.judgment().context().entries();
+    let index = context_entries
         .iter()
         .position(|(var, _)| var == name)
         .unwrap_or_else(|| panic!("assignment target `{}` not in context", name));
-    let output_index = output_entries
+
+    let left_types: Vec<TypeExpr> = context_entries[0..index]
         .iter()
-        .position(|(var, _)| var == name)
-        .unwrap_or_else(|| panic!("assignment target `{}` not in output context", name));
+        .map(|(_, ty)| ty.clone())
+        .collect();
+    let right_types: Vec<TypeExpr> = context_entries[index + 1..]
+        .iter()
+        .map(|(_, ty)| ty.clone())
+        .collect();
+    let lhs_ty = context_entries[index].1.clone();
+    let expr_tree = match tree.children().get(0) {
+        Some(CommandChild::Expression(expr)) => expr,
+        _ => panic!("assignment expects an expression child"),
+    };
+    let expr_circuit =
+        expression_circuit::circuit_from_expr_with_context(expr_tree, context_entries);
+    let left_id = Circuit::id(left_types.clone());
+    let right_id = Circuit::id(right_types.clone());
 
-    let split = split_context_for_assignment(input_entries, input_index);
-    let expr_circuit = circuit_from_expr_with_context(expr, input_entries);
-    let expr_tape = Tape::EmbedCircuit(Box::new(expr_circuit));
+    let left_copy = Circuit::copy_n(left_types);
+    let right_copy = Circuit::copy_n(right_types);
+    let split = Circuit::Product(
+        Box::new(left_copy),
+        Box::new(Circuit::Product(
+            Box::new(Circuit::Id(lhs_ty)),
+            Box::new(right_copy),
+        )),
+    );
 
-    let left_out = id_from_entries(&output_entries[..output_index]);
-    let right_out = id_from_entries(&output_entries[output_index + 1..]);
-    let updated = tensor_tapes(vec![left_out, expr_tape, right_out]);
+    let updated = Circuit::Product(
+        Box::new(left_id),
+        Box::new(Circuit::Product(Box::new(expr_circuit), Box::new(right_id))),
+    );
 
-    Tape::Seq(Box::new(split), Box::new(updated))
+    let assign = Circuit::Seq(Box::new(split), Box::new(updated));
+
+    Tape::EmbedCircuit(Box::new(assign))
 }
 
 fn if_tape(tree: &CommandDerivationTree) -> Tape<TypeExpr, ExprGenerator> {
@@ -94,7 +108,9 @@ fn if_tape(tree: &CommandDerivationTree) -> Tape<TypeExpr, ExprGenerator> {
     Tape::Sum(Box::new(left), Box::new(right))
 }
 
-fn command_children(tree: &CommandDerivationTree) -> (&CommandDerivationTree, &CommandDerivationTree) {
+fn command_children(
+    tree: &CommandDerivationTree,
+) -> (&CommandDerivationTree, &CommandDerivationTree) {
     let mut iter = tree.children().iter().filter_map(|child| match child {
         CommandChild::Command(cmd) => Some(cmd),
         _ => None,
