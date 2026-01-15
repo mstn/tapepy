@@ -1,8 +1,8 @@
 use crate::expression_circuit::circuit_from_expr;
+use crate::expression_circuit::ExprGenerator;
 use crate::tape_language::{Circuit, Monomial, Tape};
 use crate::types::TypeExpr;
 use crate::typing::{DeductionTree, ExprForm};
-use crate::expression_circuit::ExprGenerator;
 
 pub fn tape_from_predicate(tree: &DeductionTree) -> Tape<TypeExpr, ExprGenerator> {
     match tree.form() {
@@ -78,10 +78,11 @@ fn tape_from_relation(
     args: Vec<&DeductionTree>,
     negated: bool,
 ) -> Tape<TypeExpr, ExprGenerator> {
-    let circuit = circuit_from_relation(name, args, negated);
+    let context = context_monomial_from_args(&args);
+    let circuit = circuit_from_relation(name, &args, negated);
     let embed = Tape::EmbedCircuit(Box::new(circuit));
     if args.len() > 1 {
-        Tape::Seq(Box::new(Tape::Split(context_monomial_from_args(&args))), Box::new(embed))
+        Tape::Seq(Box::new(Tape::Split(context)), Box::new(embed))
     } else {
         embed
     }
@@ -89,7 +90,7 @@ fn tape_from_relation(
 
 fn circuit_from_relation(
     name: String,
-    args: Vec<&DeductionTree>,
+    args: &[&DeductionTree],
     negated: bool,
 ) -> Circuit<TypeExpr, ExprGenerator> {
     let inputs = product_many(args.iter().map(|arg| circuit_from_expr(arg)).collect());

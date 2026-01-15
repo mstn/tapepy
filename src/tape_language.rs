@@ -1,4 +1,5 @@
 use open_hypergraphs::lax::{Arrow as _, Monoidal, OpenHypergraph};
+use std::fmt;
 
 pub trait GeneratorShape {
     fn arity(&self) -> usize;
@@ -10,6 +11,16 @@ pub enum Monomial<S> {
     One,
     Atom(S),
     Product(Box<Monomial<S>>, Box<Monomial<S>>),
+}
+
+impl<S: fmt::Display> fmt::Display for Monomial<S> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Monomial::One => write!(f, "1"),
+            Monomial::Atom(sort) => write!(f, "{}", sort),
+            Monomial::Product(left, right) => write!(f, "({} * {})", left, right),
+        }
+    }
 }
 
 impl<S> Monomial<S> {
@@ -74,6 +85,22 @@ pub enum Circuit<S, G> {
     Copy(S),
     Discard(S),
     Join(S),
+}
+
+impl<S: fmt::Display, G: fmt::Display> fmt::Display for Circuit<S, G> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Circuit::Id(sort) => write!(f, "id({})", sort),
+            Circuit::IdOne => write!(f, "id(1)"),
+            Circuit::Generator(gen) => write!(f, "{}", gen),
+            Circuit::Swap { left, right } => write!(f, "swap({}, {})", left, right),
+            Circuit::Seq(left, right) => write!(f, "{}; {}", left, right),
+            Circuit::Product(left, right) => write!(f, "{} ⊗ {}", left, right),
+            Circuit::Copy(sort) => write!(f, "copy({})", sort),
+            Circuit::Discard(sort) => write!(f, "discard({})", sort),
+            Circuit::Join(sort) => write!(f, "join({})", sort),
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -365,7 +392,7 @@ fn compose_lax_unchecked<S: Clone + PartialEq, G: Clone>(
     lhs: &OpenHypergraph<S, G>,
     rhs: &OpenHypergraph<S, G>,
 ) -> OpenHypergraph<S, G> {
-    // Lax composition: we only check interface lengths here, sort checking is deferred.
+    // Lax composition: we only check interface lengths here; sort checking is deferred.
     if lhs.targets.len() != rhs.sources.len() {
         panic!(
             "unchecked composition requires same arity, got {} vs {}",
@@ -373,7 +400,6 @@ fn compose_lax_unchecked<S: Clone + PartialEq, G: Clone>(
             rhs.sources.len()
         );
     }
-
     let n = lhs.hypergraph.nodes.len();
     let mut composed = lhs.tensor(rhs);
 

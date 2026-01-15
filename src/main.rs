@@ -1,12 +1,13 @@
 mod command_dot;
 mod command_edge;
 mod command_hypergraph;
+mod command_tape;
 mod command_typing;
 mod context;
 mod expression_circuit;
 mod hypergraph;
-mod python_builtin_signatures;
 mod predicate_tape;
+mod python_builtin_signatures;
 mod solver;
 mod tape_language;
 mod types;
@@ -16,32 +17,42 @@ use std::error::Error;
 
 use command_dot::{generate_dot_with_clusters, to_svg_with_clusters};
 use command_edge::CommandEdge;
-use expression_circuit::{circuit_from_expr, hypergraph_from_circuit};
+use command_tape::tape_from_command;
+use command_typing::infer_command_from_suite;
 use graphviz_rust::printer::{DotPrinter, PrinterContext};
 use open_hypergraphs::lax::OpenHypergraph;
 use open_hypergraphs_dot::Options;
 use rustpython_parser::{ast, Parse};
 use solver::{apply_substitution, solve_hypergraph_types};
-use typing::infer_expression;
 
 fn main() -> Result<(), Box<dyn Error>> {
     let input = std::env::args().skip(1).collect::<Vec<_>>().join(" ");
-    let source = if input.is_empty() { "x + 1" } else { &input };
+    let source = if input.is_empty() {
+        "x = 1\ny = x + 2\nif x < y:\n  z = abs(x)\nelse:\n  z = int(y)"
+    } else {
+        &input
+    };
 
-    let expr = match ast::Expr::parse(source, "<input>") {
-        Ok(expr) => expr,
+    let suite = match ast::Suite::parse(source, "<input>") {
+        Ok(suite) => suite,
         Err(err) => {
             eprintln!("Parse error: {}", err);
             return Ok(());
         }
     };
 
-    let tree = infer_expression(&expr);
-    let circuit = circuit_from_expr(&tree);
-    let term =
-        hypergraph_from_circuit(&circuit).map_edges(|edge| CommandEdge::Atom(edge.to_string()));
-    println!("{}", tree);
-    println!("{}", hypergraph::format_hypergraph(&term));
+    let tree = infer_command_from_suite(&suite);
+    let tape = tape_from_command(&tree);
+    let mut next_id = 0usize;
+    let term = tape
+        .to_hypergraph(&mut || {
+            let id = next_id;
+            next_id += 1;
+            types::TypeExpr::Var(types::TypeVar(id))
+        })
+        .map_edges(|edge| CommandEdge::Atom(edge.to_string()));
+
+    let visual_graph = term.map_nodes(|mono| types::TypeExpr::Named(format!("{}", mono)));
 
     let opts = Options {
         node_label: Box::new(|t: &types::TypeExpr| t.to_string()),
@@ -49,19 +60,12 @@ fn main() -> Result<(), Box<dyn Error>> {
         ..Options::default()
     };
 
-    write_svg_with_fallback("./out", &term, &opts)?;
+    write_svg_with_fallback("./out", &visual_graph, &opts)?;
+    let strict = visual_graph.to_strict();
+    let strict_lax = OpenHypergraph::from_strict(strict);
+    write_svg_with_fallback("./out_strict", &strict_lax, &opts)?;
 
-    match solve_hypergraph_types(&term) {
-        Ok(subst) => {
-            let substituted = apply_substitution(&term, &subst);
-            let strict = substituted.to_strict();
-            let strict_lax = OpenHypergraph::from_strict(strict);
-            write_svg_with_fallback("./out_strict", &strict_lax, &opts)?;
-        }
-        Err(err) => {
-            eprintln!("Type solving failed: {}", err);
-        }
-    }
+    // Type solving is only available for graphs with TypeExpr node labels.
     Ok(())
 }
 
