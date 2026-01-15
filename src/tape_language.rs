@@ -258,6 +258,105 @@ impl<S: Clone + PartialEq, G: GeneratorShape + Clone> Circuit<S, G> {
     }
 }
 
+impl<S: Clone + PartialEq, G: GeneratorShape + Clone> Tape<S, G> {
+    pub fn to_hypergraph(
+        &self,
+        fresh_sort: &mut impl FnMut() -> S,
+    ) -> OpenHypergraph<Monomial<S>, Circuit<Monomial<S>, G>> {
+        match self {
+            Tape::Id(mono) => OpenHypergraph::identity(vec![mono.clone()]),
+            Tape::IdZero => OpenHypergraph::empty(),
+            Tape::EmbedCircuit(circuit) => {
+                let lifted = lift_circuit(circuit);
+                let arity = circuit.typing();
+                OpenHypergraph::singleton(
+                    lifted,
+                    fresh_monomials(fresh_sort, arity.inputs),
+                    fresh_monomials(fresh_sort, arity.outputs),
+                )
+            }
+            Tape::Swap { left, right } => {
+                let mut graph = OpenHypergraph::empty();
+                let left_id = graph.new_node(left.clone());
+                let right_id = graph.new_node(right.clone());
+                graph.sources = vec![left_id, right_id];
+                graph.targets = vec![right_id, left_id];
+                graph
+            }
+            Tape::Seq(left, right) => {
+                let left_graph = left.to_hypergraph(fresh_sort);
+                let right_graph = right.to_hypergraph(fresh_sort);
+                compose_lax_unchecked(&left_graph, &right_graph)
+            }
+            Tape::Sum(left, right) => {
+                let left_graph = left.to_hypergraph(fresh_sort);
+                let right_graph = right.to_hypergraph(fresh_sort);
+                left_graph.tensor(&right_graph)
+            }
+            Tape::Discard(mono) => {
+                let mut graph = OpenHypergraph::empty();
+                let node = graph.new_node(mono.clone());
+                graph.sources = vec![node];
+                graph.targets = Vec::new();
+                graph
+            }
+            Tape::Split(mono) => {
+                let mut graph = OpenHypergraph::empty();
+                let node = graph.new_node(mono.clone());
+                graph.sources = vec![node];
+                graph.targets = vec![node, node];
+                graph
+            }
+            Tape::Create(mono) => {
+                let mut graph = OpenHypergraph::empty();
+                let node = graph.new_node(mono.clone());
+                graph.sources = Vec::new();
+                graph.targets = vec![node];
+                graph
+            }
+            Tape::Merge(mono) => {
+                let mut graph = OpenHypergraph::empty();
+                let node = graph.new_node(mono.clone());
+                graph.sources = vec![node, node];
+                graph.targets = vec![node];
+                graph
+            }
+        }
+    }
+}
+
+fn fresh_monomials<S>(
+    fresh_sort: &mut impl FnMut() -> S,
+    count: usize,
+) -> Vec<Monomial<S>> {
+    (0..count)
+        .map(|_| Monomial::atom(fresh_sort()))
+        .collect()
+}
+
+fn lift_circuit<S: Clone, G: Clone>(circuit: &Circuit<S, G>) -> Circuit<Monomial<S>, G> {
+    match circuit {
+        Circuit::Id(sort) => Circuit::Id(Monomial::atom(sort.clone())),
+        Circuit::IdOne => Circuit::IdOne,
+        Circuit::Generator(gen) => Circuit::Generator(gen.clone()),
+        Circuit::Swap { left, right } => Circuit::Swap {
+            left: Monomial::atom(left.clone()),
+            right: Monomial::atom(right.clone()),
+        },
+        Circuit::Seq(left, right) => Circuit::Seq(
+            Box::new(lift_circuit(left)),
+            Box::new(lift_circuit(right)),
+        ),
+        Circuit::Product(left, right) => Circuit::Product(
+            Box::new(lift_circuit(left)),
+            Box::new(lift_circuit(right)),
+        ),
+        Circuit::Copy(sort) => Circuit::Copy(Monomial::atom(sort.clone())),
+        Circuit::Discard(sort) => Circuit::Discard(Monomial::atom(sort.clone())),
+        Circuit::Join(sort) => Circuit::Join(Monomial::atom(sort.clone())),
+    }
+}
+
 fn fresh_sorts<S, F: FnMut() -> S>(fresh_sort: &mut F, count: usize) -> Vec<S> {
     (0..count).map(|_| fresh_sort()).collect()
 }
