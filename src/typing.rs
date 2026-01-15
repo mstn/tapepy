@@ -100,6 +100,12 @@ pub fn infer_expression_in_context(expr: &Expr, context: &Context) -> DeductionT
     infer_expr(expr, context)
 }
 
+pub fn infer_expression(expr: &Expr) -> DeductionTree {
+    let mut context = Context::default();
+    collect_free_vars(expr, &mut context);
+    infer_expr(expr, &context)
+}
+
 pub fn infer_predicate_in_context(expr: &Expr, context: &Context) -> DeductionTree {
     infer_predicate_expr(expr, context)
 }
@@ -197,6 +203,30 @@ fn infer_expr(expr: &Expr, context: &Context) -> DeductionTree {
                 TypeExpr::Bool,
                 children,
                 ExprForm::BoolOp(label),
+            )
+        }
+        Expr::Compare(compare) => {
+            if compare.ops.len() != 1 || compare.comparators.len() != 1 {
+                panic!("chained comparisons are not supported in expressions");
+            }
+            let left = infer_expr(&compare.left, context);
+            let right = infer_expr(&compare.comparators[0], context);
+            let op_label = compare_op_label(&compare.ops[0]);
+            let output =
+                resolve_builtin_output(&op_label, &[left.judgment.ty.clone(), right.judgment.ty.clone()]);
+            if !is_potential_bool(&output) {
+                panic!(
+                    "type error: comparison expects Bool result, got {}",
+                    output
+                );
+            }
+            make_node(
+                "Compare",
+                expr,
+                context,
+                TypeExpr::Bool,
+                vec![left, right],
+                ExprForm::Compare(op_label),
             )
         }
         _ => panic!("unsupported Python expression: {:?}", expr),
@@ -359,6 +389,12 @@ fn collect_free_vars(expr: &Expr, context: &mut Context) {
         }
         Expr::BoolOp(bool_op) => {
             for value in &bool_op.values {
+                collect_free_vars(value, context);
+            }
+        }
+        Expr::Compare(compare) => {
+            collect_free_vars(&compare.left, context);
+            for value in &compare.comparators {
                 collect_free_vars(value, context);
             }
         }

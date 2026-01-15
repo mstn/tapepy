@@ -1,3 +1,4 @@
+use std::fmt;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use open_hypergraphs::lax::OpenHypergraph;
@@ -23,6 +24,12 @@ impl ExprGenerator {
     }
 }
 
+impl fmt::Display for ExprGenerator {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.name)
+    }
+}
+
 impl GeneratorShape for ExprGenerator {
     fn arity(&self) -> usize {
         self.arity
@@ -38,9 +45,7 @@ impl GeneratorShape for ExprGenerator {
 pub fn circuit_from_expr(tree: &DeductionTree) -> Circuit<TypeExpr, ExprGenerator> {
     match tree.form() {
         ExprForm::Var(_) => Circuit::Id(tree.judgment().ty().clone()),
-        ExprForm::Const(label) => {
-            Circuit::Generator(ExprGenerator::new(label, 0, 1))
-        }
+        ExprForm::Const(label) => Circuit::Generator(ExprGenerator::new(label, 0, 1)),
         ExprForm::UnaryOp(op) => {
             assert_child_count(tree, 1, "UnaryOp");
             let child = circuit_from_expr(&tree.children()[0]);

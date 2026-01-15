@@ -114,10 +114,7 @@ fn if_graph(tree: &CommandDerivationTree) -> OpenHypergraph<TypeExpr, CommandEdg
     };
 
     let context_entries = tree.judgment().context().entries();
-    let context_types: Vec<TypeExpr> = context_entries
-        .iter()
-        .map(|(_, ty)| ty.clone())
-        .collect();
+    let context_types: Vec<TypeExpr> = context_entries.iter().map(|(_, ty)| ty.clone()).collect();
 
     let pred_graph = predicate_graph(pred_tree, context_entries);
     let neg_pred_graph = negate_predicate_graph(pred_graph.clone());
@@ -125,10 +122,14 @@ fn if_graph(tree: &CommandDerivationTree) -> OpenHypergraph<TypeExpr, CommandEdg
     let then_graph = from_command_tree(then_tree);
     let else_graph = from_command_tree(else_tree);
 
-    let then_guard =
-        compose_lax_unchecked(&lift_predicate_graph(pred_graph, &context_types), &then_graph);
-    let else_guard =
-        compose_lax_unchecked(&lift_predicate_graph(neg_pred_graph, &context_types), &else_graph);
+    let then_guard = compose_lax_unchecked(
+        &lift_predicate_graph(pred_graph, &context_types),
+        &then_graph,
+    );
+    let else_guard = compose_lax_unchecked(
+        &lift_predicate_graph(neg_pred_graph, &context_types),
+        &else_graph,
+    );
 
     OpenHypergraph::singleton(
         CommandEdge::Convolution(vec![then_guard, else_guard]),

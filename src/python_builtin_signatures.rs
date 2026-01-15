@@ -899,10 +899,10 @@ pub fn builtin_type_signatures() -> Vec<BuiltinSignature> {
             name: "<",
             schemes: vec![
                 TypeScheme {
-                    params: vec![t.clone()],
-                    inputs: vec![PyType::Var(t.clone()), PyType::Var(t.clone())],
+                    params: vec![t.clone(), u.clone()],
+                    inputs: vec![PyType::Var(t.clone()), PyType::Var(u.clone())],
                     output: PyType::Bool,
-                    constraints: vec![Constraint::Numeric(t.clone())],
+                    constraints: vec![Constraint::Numeric(t.clone()), Constraint::Numeric(u.clone())],
                 },
                 TypeScheme {
                     params: vec![],
@@ -916,10 +916,10 @@ pub fn builtin_type_signatures() -> Vec<BuiltinSignature> {
             name: "<=",
             schemes: vec![
                 TypeScheme {
-                    params: vec![t.clone()],
-                    inputs: vec![PyType::Var(t.clone()), PyType::Var(t.clone())],
+                    params: vec![t.clone(), u.clone()],
+                    inputs: vec![PyType::Var(t.clone()), PyType::Var(u.clone())],
                     output: PyType::Bool,
-                    constraints: vec![Constraint::Numeric(t.clone())],
+                    constraints: vec![Constraint::Numeric(t.clone()), Constraint::Numeric(u.clone())],
                 },
                 TypeScheme {
                     params: vec![],
@@ -933,10 +933,10 @@ pub fn builtin_type_signatures() -> Vec<BuiltinSignature> {
             name: ">",
             schemes: vec![
                 TypeScheme {
-                    params: vec![t.clone()],
-                    inputs: vec![PyType::Var(t.clone()), PyType::Var(t.clone())],
+                    params: vec![t.clone(), u.clone()],
+                    inputs: vec![PyType::Var(t.clone()), PyType::Var(u.clone())],
                     output: PyType::Bool,
-                    constraints: vec![Constraint::Numeric(t.clone())],
+                    constraints: vec![Constraint::Numeric(t.clone()), Constraint::Numeric(u.clone())],
                 },
                 TypeScheme {
                     params: vec![],
@@ -950,10 +950,10 @@ pub fn builtin_type_signatures() -> Vec<BuiltinSignature> {
             name: ">=",
             schemes: vec![
                 TypeScheme {
-                    params: vec![t.clone()],
-                    inputs: vec![PyType::Var(t.clone()), PyType::Var(t.clone())],
+                    params: vec![t.clone(), u.clone()],
+                    inputs: vec![PyType::Var(t.clone()), PyType::Var(u.clone())],
                     output: PyType::Bool,
-                    constraints: vec![Constraint::Numeric(t.clone())],
+                    constraints: vec![Constraint::Numeric(t.clone()), Constraint::Numeric(u.clone())],
                 },
                 TypeScheme {
                     params: vec![],

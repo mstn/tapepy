@@ -3,11 +3,11 @@ mod command_edge;
 mod command_hypergraph;
 mod command_typing;
 mod context;
+mod expression_circuit;
 mod hypergraph;
 mod python_builtin_signatures;
 mod solver;
 mod tape_language;
-mod expression_circuit;
 mod types;
 mod typing;
 
@@ -15,31 +15,30 @@ use std::error::Error;
 
 use command_dot::{generate_dot_with_clusters, to_svg_with_clusters};
 use command_edge::CommandEdge;
-use command_typing::infer_command_from_suite;
+use expression_circuit::{circuit_from_expr, hypergraph_from_circuit};
 use graphviz_rust::printer::{DotPrinter, PrinterContext};
 use open_hypergraphs::lax::OpenHypergraph;
 use open_hypergraphs_dot::Options;
 use rustpython_parser::{ast, Parse};
 use solver::{apply_substitution, solve_hypergraph_types};
+use typing::infer_expression;
 
 fn main() -> Result<(), Box<dyn Error>> {
     let input = std::env::args().skip(1).collect::<Vec<_>>().join(" ");
-    let source = if input.is_empty() {
-        "x = 1\ny = x"
-    } else {
-        &input
-    };
+    let source = if input.is_empty() { "x + 1" } else { &input };
 
-    let suite = match ast::Suite::parse(source, "<input>") {
-        Ok(suite) => suite,
+    let expr = match ast::Expr::parse(source, "<input>") {
+        Ok(expr) => expr,
         Err(err) => {
             eprintln!("Parse error: {}", err);
             return Ok(());
         }
     };
 
-    let tree = infer_command_from_suite(&suite);
-    let term = command_hypergraph::from_command_tree(&tree);
+    let tree = infer_expression(&expr);
+    let circuit = circuit_from_expr(&tree);
+    let term =
+        hypergraph_from_circuit(&circuit).map_edges(|edge| CommandEdge::Atom(edge.to_string()));
     println!("{}", tree);
     println!("{}", hypergraph::format_hypergraph(&term));
 
