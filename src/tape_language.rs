@@ -138,7 +138,10 @@ impl<S, G: GeneratorShape> Circuit<S, G> {
             Circuit::Product(left, right) => {
                 let left_ty = left.typing();
                 let right_ty = right.typing();
-                CircuitArity::new(left_ty.inputs + right_ty.inputs, left_ty.outputs + right_ty.outputs)
+                CircuitArity::new(
+                    left_ty.inputs + right_ty.inputs,
+                    left_ty.outputs + right_ty.outputs,
+                )
             }
             Circuit::Copy(_) => CircuitArity::new(1, 2),
             Circuit::Discard(_) => CircuitArity::new(1, 0),
@@ -199,7 +202,7 @@ impl<S, G: GeneratorShape> Tape<S, G> {
     }
 }
 
-impl<S: Clone, G: GeneratorShape + Clone> Circuit<S, G> {
+impl<S: Clone + PartialEq, G: GeneratorShape + Clone> Circuit<S, G> {
     pub fn to_hypergraph<F>(&self, fresh_sort: &mut F) -> OpenHypergraph<S, G>
     where
         F: FnMut() -> S,

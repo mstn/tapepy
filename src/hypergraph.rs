@@ -139,18 +139,25 @@ fn binop_graph(op: &str, tree: &DeductionTree) -> OpenHypergraph<TypeExpr, Strin
 }
 
 fn call_graph(name: &str, tree: &DeductionTree) -> OpenHypergraph<TypeExpr, String> {
-    if tree.children().len() != 1 {
-        panic!("function `{}` expects 1 argument", name);
+    let mut graphs = Vec::with_capacity(tree.children().len());
+    for child in tree.children() {
+        graphs.push(from_deduction_tree(child));
     }
-    let child = &tree.children()[0];
-    let child_graph = from_deduction_tree(child);
+    let tensor = if graphs.is_empty() {
+        OpenHypergraph::empty()
+    } else {
+        tensor_many(graphs)
+    };
 
-    let inferred_input = child.judgment().ty().clone();
-    let inferred_output = tree.judgment().ty().clone();
-    let (source_type, target_type) = call_signature(name, inferred_input, inferred_output);
+    let source_type = tree
+        .children()
+        .iter()
+        .map(|child| child.judgment().ty().clone())
+        .collect();
+    let target_type = vec![tree.judgment().ty().clone()];
     let op_graph = OpenHypergraph::singleton(name.to_string(), source_type, target_type);
 
-    compose_lax_unchecked(&child_graph, &op_graph)
+    compose_lax_unchecked(&tensor, &op_graph)
 }
 
 fn boolop_graph(op: &str, tree: &DeductionTree) -> OpenHypergraph<TypeExpr, String> {
@@ -292,18 +299,6 @@ fn lookup_var_type(name: &str, context: &ContextSnapshot) -> TypeExpr {
         .find(|(var, _)| var == name)
         .map(|(_, ty)| ty.clone())
         .unwrap_or_else(|| panic!("variable `{}` not found in context", name))
-}
-
-fn call_signature(
-    name: &str,
-    inferred_input: TypeExpr,
-    inferred_output: TypeExpr,
-) -> (Vec<TypeExpr>, Vec<TypeExpr>) {
-    match name {
-        "bit_length" => (vec![TypeExpr::Int], vec![TypeExpr::Int]),
-        "sqrt" => (vec![TypeExpr::Float], vec![TypeExpr::Float]),
-        _ => (vec![inferred_input], vec![inferred_output]),
-    }
 }
 
 fn format_nodes(nodes: &[NodeId]) -> String {

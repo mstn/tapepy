@@ -1,11 +1,18 @@
+use std::collections::HashMap;
 use std::fmt;
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 use rustpython_parser::ast::{
     BoolOp, CmpOp, Constant, Expr, ExprCall, ExprCompare, ExprName, Operator, UnaryOp,
 };
 
 use crate::context::Context;
-use crate::types::TypeExpr;
+use crate::python_builtin_signatures::{
+    builtin_type_signatures, Constraint, PyType, TypeScheme, TypeVar,
+};
+use crate::types::{TypeExpr, TypeVar as ExprTypeVar};
+
+static NEXT_TYPE_VAR: AtomicUsize = AtomicUsize::new(0);
 
 #[derive(Debug, Clone)]
 pub struct Judgment {
@@ -89,12 +96,6 @@ impl DeductionTree {
     }
 }
 
-pub fn infer_expression(expr: &Expr) -> DeductionTree {
-    let mut context = Context::default();
-    collect_free_vars(expr, &mut context);
-    infer_expr(expr, &context)
-}
-
 pub fn infer_expression_in_context(expr: &Expr, context: &Context) -> DeductionTree {
     infer_expr(expr, context)
 }
@@ -158,19 +159,18 @@ fn infer_expr(expr: &Expr, context: &Context) -> DeductionTree {
             _ => panic!("unsupported unary operator in expression: {:?}", unary.op),
         },
         Expr::BinOp(bin) => {
-            if !is_numeric_binop(&bin.op) {
-                panic!("unsupported binary operator in expression: {:?}", bin.op);
-            }
             let left = infer_expr(&bin.left, context);
             let right = infer_expr(&bin.right, context);
-            let ty = TypeExpr::lub(left.judgment.ty.clone(), right.judgment.ty.clone());
+            let op = binop_label(&bin.op);
+            let ty =
+                resolve_builtin_output(&op, &[left.judgment.ty.clone(), right.judgment.ty.clone()]);
             make_node(
                 "BinOp",
                 expr,
                 context,
                 ty,
                 vec![left, right],
-                ExprForm::BinOp(binop_label(&bin.op)),
+                ExprForm::BinOp(op),
             )
         }
         Expr::Call(call) => infer_call(expr, call, context),
@@ -266,11 +266,7 @@ fn infer_predicate_expr(expr: &Expr, context: &Context) -> DeductionTree {
     }
 }
 
-fn infer_predicate_compare(
-    expr: &Expr,
-    compare: &ExprCompare,
-    context: &Context,
-) -> DeductionTree {
+fn infer_predicate_compare(expr: &Expr, compare: &ExprCompare, context: &Context) -> DeductionTree {
     if compare.ops.len() != 1 || compare.comparators.len() != 1 {
         panic!("chained comparisons are not supported in predicates");
     }
@@ -278,17 +274,14 @@ fn infer_predicate_compare(
     let left = infer_expression_in_context(&compare.left, context);
     let right = infer_expression_in_context(&compare.comparators[0], context);
 
-    if !is_potential_numeric(left.judgment.ty())
-        || !is_potential_numeric(right.judgment.ty())
-    {
-        panic!(
-            "type error: comparison expects numeric operands, got {} and {}",
-            left.judgment.ty(),
-            right.judgment.ty()
-        );
-    }
-
     let op_label = compare_op_label(&compare.ops[0]);
+    let output = resolve_builtin_output(
+        &op_label,
+        &[left.judgment.ty.clone(), right.judgment.ty.clone()],
+    );
+    if !is_potential_bool(&output) {
+        panic!("type error: comparison expects Bool result, got {}", output);
+    }
     make_node(
         "PredCompare",
         expr,
@@ -303,22 +296,32 @@ fn infer_predicate_call(expr: &Expr, call: &ExprCall, context: &Context) -> Dedu
     if !call.keywords.is_empty() {
         panic!("keyword arguments are not supported");
     }
-    if call.args.len() != 1 {
-        panic!("predicate calls are unary; got {} args", call.args.len());
-    }
 
     let name = match call.func.as_ref() {
         Expr::Name(ExprName { id, .. }) => id.as_str().to_string(),
         _ => panic!("unsupported call target in predicate: {:?}", call.func),
     };
 
-    let child = infer_expr(&call.args[0], context);
+    let mut children = Vec::with_capacity(call.args.len());
+    let mut arg_types = Vec::with_capacity(call.args.len());
+    for arg in &call.args {
+        let child = infer_expr(arg, context);
+        arg_types.push(child.judgment.ty.clone());
+        children.push(child);
+    }
+    let output = resolve_builtin_output(&name, &arg_types);
+    if !is_potential_bool(&output) {
+        panic!(
+            "predicate call expects Bool, got {} from `{}`",
+            output, name
+        );
+    }
     make_node(
         "PredCall",
         expr,
         context,
         TypeExpr::Unit,
-        vec![child],
+        children,
         ExprForm::Call(name),
     )
 }
@@ -328,24 +331,20 @@ fn infer_call(expr: &Expr, call: &ExprCall, context: &Context) -> DeductionTree 
         panic!("keyword arguments are not supported");
     }
 
-    let (name, arg) = match call.func.as_ref() {
-        Expr::Name(ExprName { id, .. }) => {
-            if call.args.len() != 1 {
-                panic!("function `{}` is unary; got {} args", id, call.args.len());
-            }
-            (id.as_str().to_string(), &call.args[0])
-        }
+    let name = match call.func.as_ref() {
+        Expr::Name(ExprName { id, .. }) => id.as_str().to_string(),
         _ => panic!("unsupported call target in expression: {:?}", call.func),
     };
 
-    let builtin = builtin_fn(&name).unwrap_or_else(|| panic!("unsupported function `{}`", name));
-    let child = infer_expr(arg, context);
-    let ty = match builtin {
-        BuiltinFn::Fixed(fixed) => fixed,
-        BuiltinFn::SameAsArg => child.judgment.ty.clone(),
-    };
-
-    make_node("Call", expr, context, ty, vec![child], ExprForm::Call(name))
+    let mut children = Vec::with_capacity(call.args.len());
+    let mut arg_types = Vec::with_capacity(call.args.len());
+    for arg in &call.args {
+        let child = infer_expr(arg, context);
+        arg_types.push(child.judgment.ty.clone());
+        children.push(child);
+    }
+    let ty = resolve_builtin_output(&name, &arg_types);
+    make_node("Call", expr, context, ty, children, ExprForm::Call(name))
 }
 
 fn collect_free_vars(expr: &Expr, context: &mut Context) {
@@ -368,14 +367,12 @@ fn collect_free_vars(expr: &Expr, context: &mut Context) {
                 panic!("keyword arguments are not supported");
             }
             match call.func.as_ref() {
-                Expr::Name(ExprName { id, .. }) => {
-                    if call.args.len() != 1 {
-                        panic!("function `{}` is unary; got {} args", id, call.args.len());
-                    }
-                }
+                Expr::Name(ExprName { .. }) => {}
                 _ => panic!("unsupported call target in expression: {:?}", call.func),
             }
-            collect_free_vars(&call.args[0], context);
+            for arg in &call.args {
+                collect_free_vars(arg, context);
+            }
         }
         Expr::Constant(_) => {}
         _ => panic!("unsupported Python expression: {:?}", expr),
@@ -421,33 +418,200 @@ fn make_node(
     }
 }
 
-fn is_numeric_binop(op: &Operator) -> bool {
-    matches!(
-        op,
-        Operator::Add
-            | Operator::Sub
-            | Operator::Mult
-            | Operator::Div
-            | Operator::Mod
-            | Operator::Pow
-            | Operator::FloorDiv
-    )
-}
-
-enum BuiltinFn {
-    Fixed(TypeExpr),
-    SameAsArg,
-}
-
-fn builtin_fn(name: &str) -> Option<BuiltinFn> {
-    match name {
-        "bool" => Some(BuiltinFn::Fixed(TypeExpr::Bool)),
-        "int" => Some(BuiltinFn::Fixed(TypeExpr::Int)),
-        "float" => Some(BuiltinFn::Fixed(TypeExpr::Float)),
-        "abs" => Some(BuiltinFn::SameAsArg),
-        "bit_length" => Some(BuiltinFn::Fixed(TypeExpr::Int)),
-        _ => None,
+fn resolve_builtin_output(name: &str, args: &[TypeExpr]) -> TypeExpr {
+    let schemes = builtin_schemes(name, args.len());
+    if schemes.is_empty() {
+        panic!("unsupported builtin or operator `{}`", name);
     }
+
+    let mut numeric_fallback = false;
+    for scheme in schemes {
+        if let Some(mapping) = match_scheme_inputs(args, &scheme) {
+            if constraints_ok(&scheme, &mapping) {
+                let mut mapping = mapping;
+                return pytype_to_typeexpr(&scheme.output, &mut mapping);
+            }
+        }
+        if is_numeric_scheme(&scheme) {
+            numeric_fallback = true;
+        }
+    }
+
+    if numeric_fallback && args.len() == 2 {
+        let left = &args[0];
+        let right = &args[1];
+        if is_potential_numeric(left) && is_potential_numeric(right) {
+            return TypeExpr::lub(left.clone(), right.clone());
+        }
+    }
+
+    panic!(
+        "no matching builtin signature for `{}` with {} args",
+        name,
+        args.len()
+    );
+}
+
+fn builtin_schemes(name: &str, arity: usize) -> Vec<TypeScheme> {
+    for builtin in builtin_type_signatures() {
+        if builtin.name == name {
+            return builtin
+                .schemes
+                .into_iter()
+                .filter(|scheme| scheme.inputs.len() == arity)
+                .collect();
+        }
+    }
+    Vec::new()
+}
+
+fn match_scheme_inputs(
+    args: &[TypeExpr],
+    scheme: &TypeScheme,
+) -> Option<HashMap<TypeVar, TypeExpr>> {
+    if args.len() != scheme.inputs.len() {
+        return None;
+    }
+
+    let mut mapping = HashMap::new();
+    for (arg, expected) in args.iter().zip(scheme.inputs.iter()) {
+        if !match_pytype(arg, expected, &mut mapping) {
+            return None;
+        }
+    }
+    Some(mapping)
+}
+
+fn match_pytype(
+    arg: &TypeExpr,
+    expected: &PyType,
+    mapping: &mut HashMap<TypeVar, TypeExpr>,
+) -> bool {
+    match expected {
+        PyType::Any => true,
+        PyType::Var(var) => match mapping.get(var) {
+            Some(existing) => match (existing, arg) {
+                (TypeExpr::Var(_), _) => {
+                    mapping.insert(var.clone(), arg.clone());
+                    true
+                }
+                (_, TypeExpr::Var(_)) => true,
+                _ => existing == arg,
+            },
+            None => {
+                mapping.insert(var.clone(), arg.clone());
+                true
+            }
+        },
+        _ => {
+            let expected_expr = pytype_to_typeexpr_label(expected, mapping);
+            matches!(arg, TypeExpr::Var(_)) || *arg == expected_expr
+        }
+    }
+}
+
+fn constraints_ok(scheme: &TypeScheme, mapping: &HashMap<TypeVar, TypeExpr>) -> bool {
+    for constraint in &scheme.constraints {
+        match constraint {
+            Constraint::Numeric(var) => {
+                if let Some(ty) = mapping.get(var) {
+                    if !is_potential_numeric(ty) {
+                        return false;
+                    }
+                }
+            }
+            Constraint::Iterable(_) | Constraint::Mapping(_, _) | Constraint::Sequence(_) => {}
+        }
+    }
+    true
+}
+
+fn is_numeric_scheme(scheme: &TypeScheme) -> bool {
+    scheme
+        .constraints
+        .iter()
+        .any(|constraint| matches!(constraint, Constraint::Numeric(_)))
+}
+
+fn pytype_to_typeexpr(pytype: &PyType, mapping: &mut HashMap<TypeVar, TypeExpr>) -> TypeExpr {
+    match pytype {
+        PyType::Bool => TypeExpr::Bool,
+        PyType::Int => TypeExpr::Int,
+        PyType::Float => TypeExpr::Float,
+        PyType::NoneType => TypeExpr::Unit,
+        PyType::Var(var) => mapping
+            .entry(var.clone())
+            .or_insert_with(fresh_type_var)
+            .clone(),
+        PyType::Any => TypeExpr::Named("Any".to_string()),
+        _ => TypeExpr::Named(format_pytype(pytype, mapping)),
+    }
+}
+
+fn pytype_to_typeexpr_label(pytype: &PyType, mapping: &HashMap<TypeVar, TypeExpr>) -> TypeExpr {
+    match pytype {
+        PyType::Bool => TypeExpr::Bool,
+        PyType::Int => TypeExpr::Int,
+        PyType::Float => TypeExpr::Float,
+        PyType::NoneType => TypeExpr::Unit,
+        PyType::Any => TypeExpr::Named("Any".to_string()),
+        PyType::Var(var) => mapping
+            .get(var)
+            .cloned()
+            .unwrap_or_else(|| TypeExpr::Named(var.0.to_string())),
+        _ => TypeExpr::Named(format_pytype(pytype, mapping)),
+    }
+}
+
+fn format_pytype(pytype: &PyType, mapping: &HashMap<TypeVar, TypeExpr>) -> String {
+    match pytype {
+        PyType::Any => "Any".to_string(),
+        PyType::NoneType => "None".to_string(),
+        PyType::Bool => "Bool".to_string(),
+        PyType::Int => "Int".to_string(),
+        PyType::Float => "Float".to_string(),
+        PyType::Complex => "Complex".to_string(),
+        PyType::Str => "Str".to_string(),
+        PyType::Bytes => "Bytes".to_string(),
+        PyType::ByteArray => "ByteArray".to_string(),
+        PyType::Range => "Range".to_string(),
+        PyType::Slice => "Slice".to_string(),
+        PyType::MemoryView => "MemoryView".to_string(),
+        PyType::Object => "Object".to_string(),
+        PyType::Type => "Type".to_string(),
+        PyType::Var(var) => mapping
+            .get(var)
+            .map(|ty| ty.to_string())
+            .unwrap_or_else(|| var.0.to_string()),
+        PyType::Iterable(inner) => format!("Iterable[{}]", format_pytype(inner, mapping)),
+        PyType::Sequence(inner) => format!("Sequence[{}]", format_pytype(inner, mapping)),
+        PyType::List(inner) => format!("List[{}]", format_pytype(inner, mapping)),
+        PyType::Tuple(items) => {
+            let parts = items
+                .iter()
+                .map(|item| format_pytype(item, mapping))
+                .collect::<Vec<_>>();
+            format!("Tuple[{}]", parts.join(", "))
+        }
+        PyType::TupleOf(inner) => format!("Tuple[{}]", format_pytype(inner, mapping)),
+        PyType::Dict(key, value) => format!(
+            "Dict[{}, {}]",
+            format_pytype(key, mapping),
+            format_pytype(value, mapping)
+        ),
+        PyType::Set(inner) => format!("Set[{}]", format_pytype(inner, mapping)),
+        PyType::FrozenSet(inner) => format!("FrozenSet[{}]", format_pytype(inner, mapping)),
+        PyType::Mapping(key, value) => format!(
+            "Mapping[{}, {}]",
+            format_pytype(key, mapping),
+            format_pytype(value, mapping)
+        ),
+    }
+}
+
+fn fresh_type_var() -> TypeExpr {
+    let id = NEXT_TYPE_VAR.fetch_add(1, Ordering::Relaxed);
+    TypeExpr::Var(ExprTypeVar(id))
 }
 
 fn expr_to_string(expr: &Expr) -> String {
@@ -613,7 +777,7 @@ fn is_potential_bool(expr: &TypeExpr) -> bool {
         TypeExpr::Var(_) => true,
         TypeExpr::Lub(left, right) => is_potential_bool(left) && is_potential_bool(right),
         TypeExpr::Union(left, right) => is_potential_bool(left) && is_potential_bool(right),
-        TypeExpr::Int | TypeExpr::Float => false,
+        TypeExpr::Int | TypeExpr::Float | TypeExpr::Named(_) => false,
     }
 }
 
@@ -623,7 +787,7 @@ fn is_potential_numeric(expr: &TypeExpr) -> bool {
         TypeExpr::Var(_) => true,
         TypeExpr::Lub(left, right) => is_potential_numeric(left) && is_potential_numeric(right),
         TypeExpr::Union(left, right) => is_potential_numeric(left) && is_potential_numeric(right),
-        TypeExpr::Bool | TypeExpr::Unit => false,
+        TypeExpr::Bool | TypeExpr::Unit | TypeExpr::Named(_) => false,
     }
 }
 

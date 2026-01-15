@@ -17,6 +17,7 @@ impl TypeSubstitution {
             TypeExpr::Unit => TypeExpr::Unit,
             TypeExpr::Int => TypeExpr::Int,
             TypeExpr::Float => TypeExpr::Float,
+            TypeExpr::Named(name) => TypeExpr::Named(name.clone()),
             TypeExpr::Var(var) => self
                 .mapping
                 .get(var)
@@ -63,9 +64,10 @@ pub fn solve_hypergraph_types<A: Clone>(
     let vars = collect_vars(graph);
     let constraints = collect_constraints(graph);
     let vars_list: Vec<TypeVar> = vars.into_iter().collect();
+    let choices = collect_choices(graph);
 
     let mut assignment = HashMap::new();
-    if backtrack_solve(&vars_list, 0, &mut assignment, &constraints, graph) {
+    if backtrack_solve(&vars_list, 0, &mut assignment, &constraints, graph, &choices) {
         Ok(TypeSubstitution { mapping: assignment })
     } else {
         Err(SolveError::NoSolution)
@@ -89,7 +91,7 @@ fn collect_vars<A>(graph: &OpenHypergraph<TypeExpr, A>) -> HashSet<TypeVar> {
 
 fn collect_vars_expr(expr: &TypeExpr, vars: &mut HashSet<TypeVar>) {
     match expr {
-        TypeExpr::Bool | TypeExpr::Unit | TypeExpr::Int | TypeExpr::Float => {}
+        TypeExpr::Bool | TypeExpr::Unit | TypeExpr::Int | TypeExpr::Float | TypeExpr::Named(_) => {}
         TypeExpr::Var(var) => {
             vars.insert(var.clone());
         }
@@ -120,12 +122,43 @@ fn collect_constraints<A>(graph: &OpenHypergraph<TypeExpr, A>) -> Vec<(TypeExpr,
     constraints
 }
 
+fn collect_choices<A>(graph: &OpenHypergraph<TypeExpr, A>) -> Vec<TypeExpr> {
+    let mut choices = vec![
+        TypeExpr::Bool,
+        TypeExpr::Unit,
+        TypeExpr::Int,
+        TypeExpr::Float,
+    ];
+    let mut named = HashSet::new();
+    for label in &graph.hypergraph.nodes {
+        collect_named_expr(label, &mut named);
+    }
+    for name in named {
+        choices.push(TypeExpr::Named(name));
+    }
+    choices
+}
+
+fn collect_named_expr(expr: &TypeExpr, names: &mut HashSet<String>) {
+    match expr {
+        TypeExpr::Named(name) => {
+            names.insert(name.clone());
+        }
+        TypeExpr::Lub(left, right) | TypeExpr::Union(left, right) => {
+            collect_named_expr(left, names);
+            collect_named_expr(right, names);
+        }
+        _ => {}
+    }
+}
+
 fn backtrack_solve<A>(
     vars: &[TypeVar],
     idx: usize,
     assignment: &mut HashMap<TypeVar, TypeExpr>,
     constraints: &[(TypeExpr, TypeExpr)],
     graph: &OpenHypergraph<TypeExpr, A>,
+    choices: &[TypeExpr],
 ) -> bool {
     if idx == vars.len() {
         let constraints_ok = constraints
@@ -138,9 +171,9 @@ fn backtrack_solve<A>(
     }
 
     let var = vars[idx].clone();
-    for choice in [TypeExpr::Bool, TypeExpr::Unit, TypeExpr::Int, TypeExpr::Float] {
+    for choice in choices {
         assignment.insert(var.clone(), choice.clone());
-        if backtrack_solve(vars, idx + 1, assignment, constraints, graph) {
+        if backtrack_solve(vars, idx + 1, assignment, constraints, graph, choices) {
             return true;
         }
     }
@@ -154,6 +187,7 @@ fn eval_expr(expr: &TypeExpr, assignment: &HashMap<TypeVar, TypeExpr>) -> TypeEx
         TypeExpr::Unit => TypeExpr::Unit,
         TypeExpr::Int => TypeExpr::Int,
         TypeExpr::Float => TypeExpr::Float,
+        TypeExpr::Named(name) => TypeExpr::Named(name.clone()),
         TypeExpr::Var(var) => assignment
             .get(var)
             .cloned()
@@ -183,7 +217,11 @@ fn primitives_ok<A>(
         let resolved = eval_expr(label, assignment);
         matches!(
             resolved,
-            TypeExpr::Bool | TypeExpr::Unit | TypeExpr::Int | TypeExpr::Float
+            TypeExpr::Bool
+                | TypeExpr::Unit
+                | TypeExpr::Int
+                | TypeExpr::Float
+                | TypeExpr::Named(_)
         )
     })
 }
