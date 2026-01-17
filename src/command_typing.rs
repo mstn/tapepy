@@ -140,17 +140,13 @@ fn infer_assign(assign: &StmtAssign, context: &Context) -> (CommandDerivationTre
         _ => panic!("assignment target must be a variable name"),
     };
 
-    let target_ty = context
+    let _target_ty = context
         .get(&target_name)
         .cloned()
         .unwrap_or_else(|| panic!("assignment target `{}` not in context", target_name));
 
     let expr_tree = infer_expression_in_context(&assign.value, context);
-    let new_target_ty = if expr_tree.judgment().ty() == &target_ty {
-        target_ty.clone()
-    } else {
-        TypeExpr::lub(target_ty.clone(), expr_tree.judgment().ty().clone())
-    };
+    let new_target_ty = expr_tree.judgment().ty().clone();
     let mut updated_context = context.clone();
     updated_context.set_var(&target_name, new_target_ty);
 

@@ -13,7 +13,6 @@ mod tape_language;
 mod types;
 mod typing;
 
-use std::cell::Cell;
 use std::error::Error;
 
 use command_dot::{generate_dot_with_clusters, to_svg_with_clusters};
@@ -45,24 +44,16 @@ fn main() -> Result<(), Box<dyn Error>> {
     let tree = infer_command_from_suite(&suite);
     let tape = tape_from_command(&tree);
     let mut next_id = 0usize;
-    let term = tape
-        .to_hypergraph(&mut || {
-            let id = next_id;
-            next_id += 1;
-            types::TypeExpr::Var(types::TypeVar(id))
-        });
+    let term = tape.to_hypergraph(&mut || {
+        let id = next_id;
+        next_id += 1;
+        types::TypeExpr::Var(types::TypeVar(id))
+    });
 
-    let next_id = Cell::new(0usize);
     let visual_graph = term
         .map_nodes(|mono| types::TypeExpr::Named(format!("{}", mono)))
         .map_edges(|edge| {
-            let mut fresh = || {
-                let id = next_id.get();
-                next_id.set(id + 1);
-                tape_language::Monomial::atom(types::TypeExpr::Var(types::TypeVar(id)))
-            };
-            let child = edge.to_hypergraph(&mut fresh);
-            let child = child
+            let child = edge
                 .map_nodes(|mono| types::TypeExpr::Named(format!("{}", mono)))
                 .map_edges(|gen| CommandEdge::Atom(gen.to_string()));
             CommandEdge::Embedded(Box::new(child))
