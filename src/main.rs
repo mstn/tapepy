@@ -56,7 +56,8 @@ fn main() -> Result<(), Box<dyn Error>> {
     };
 
     write_svg_with_fallback("./out", &term, &opts)?;
-    let strict = term.to_strict();
+    let strict_term = term.map_edges(|edge| OpenHypergraph::from_strict(edge.to_strict()));
+    let strict = strict_term.to_strict();
     let strict_lax = OpenHypergraph::from_strict(strict);
     write_svg_with_fallback("./out_strict", &strict_lax, &opts)?;
 
