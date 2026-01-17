@@ -17,29 +17,20 @@ impl fmt::Display for CommandEdge {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             CommandEdge::Atom(label) => write!(f, "{}", label),
-            CommandEdge::Convolution(children) => {
-                writeln!(f, "Convolution({})", children.len())?;
-                for (idx, child) in children.iter().enumerate() {
-                    writeln!(f, "  [alt {}]", idx)?;
-                    for line in format_hypergraph(child).lines() {
-                        writeln!(f, "    {}", line)?;
-                    }
-                }
-                Ok(())
-            }
+            CommandEdge::Convolution(children) => write!(
+                f,
+                "Convolution({})",
+                children
+                    .iter()
+                    .map(|child| format!("{}x{}", child.sources.len(), child.targets.len()))
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            ),
             CommandEdge::Kleene(child) => {
-                writeln!(f, "Kleene")?;
-                for line in format_hypergraph(child).lines() {
-                    writeln!(f, "  {}", line)?;
-                }
-                Ok(())
+                write!(f, "Kleene({}x{})", child.sources.len(), child.targets.len())
             }
             CommandEdge::Embedded(child) => {
-                writeln!(f, "Embedded")?;
-                for line in format_hypergraph(child).lines() {
-                    writeln!(f, "  {}", line)?;
-                }
-                Ok(())
+                write!(f, "Embedded({}x{})", child.sources.len(), child.targets.len())
             }
         }
     }

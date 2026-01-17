@@ -50,7 +50,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         types::TypeExpr::Var(types::TypeVar(id))
     });
 
-    let visual_graph = term
+    let graph = term
         .map_nodes(|mono| types::TypeExpr::Named(format!("{}", mono)))
         .map_edges(|edge| {
             let child = edge
@@ -65,8 +65,8 @@ fn main() -> Result<(), Box<dyn Error>> {
         ..Options::default()
     };
 
-    write_svg_with_fallback("./out", &visual_graph, &opts)?;
-    let strict = visual_graph.to_strict();
+    write_svg_with_fallback("./out", &graph, &opts)?;
+    let strict = graph.to_strict();
     let strict_lax = OpenHypergraph::from_strict(strict);
     write_svg_with_fallback("./out_strict", &strict_lax, &opts)?;
 

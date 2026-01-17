@@ -23,7 +23,22 @@ impl<S: fmt::Display> fmt::Display for Monomial<S> {
         match self {
             Monomial::One => write!(f, "1"),
             Monomial::Atom(sort) => write!(f, "{}", sort),
-            Monomial::Product(left, right) => write!(f, "({} * {})", left, right),
+            Monomial::Product(_, _) => {
+                let mut parts = Vec::new();
+                collect_monomial_parts(self, &mut parts);
+                write!(f, "{}", parts.join(" * "))
+            }
+        }
+    }
+}
+
+fn collect_monomial_parts<S: fmt::Display>(mono: &Monomial<S>, parts: &mut Vec<String>) {
+    match mono {
+        Monomial::One => {}
+        Monomial::Atom(sort) => parts.push(sort.to_string()),
+        Monomial::Product(left, right) => {
+            collect_monomial_parts(left, parts);
+            collect_monomial_parts(right, parts);
         }
     }
 }
