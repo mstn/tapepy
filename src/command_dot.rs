@@ -528,16 +528,10 @@ fn generate_quotient_stmts<O: Clone>(
                         None,
                     )),
                 ),
-                attributes: vec![
-                    Attribute(
-                        Id::Plain(String::from("style")),
-                        Id::Plain(String::from("dotted")),
-                    ),
-                    Attribute(
-                        Id::Plain(String::from("dir")),
-                        Id::Plain(String::from("none")),
-                    ),
-                ],
+                attributes: vec![Attribute(
+                    Id::Plain(String::from("style")),
+                    Id::Plain(String::from("dotted")),
+                )],
             };
             stmts.push(Stmt::Edge(edge));
         }
@@ -642,16 +636,10 @@ fn generate_edge_clusters<O: Clone>(
                                     None,
                                 )),
                             ),
-                            attributes: vec![
-                                Attribute(
-                                    Id::Plain(String::from("style")),
-                                    Id::Plain(String::from("dotted")),
-                                ),
-                                Attribute(
-                                    Id::Plain(String::from("dir")),
-                                    Id::Plain(String::from("none")),
-                                ),
-                            ],
+                            attributes: vec![Attribute(
+                                Id::Plain(String::from("style")),
+                                Id::Plain(String::from("dotted")),
+                            )],
                         };
                         stmts.push(Stmt::Edge(edge));
                     }
@@ -667,16 +655,10 @@ fn generate_edge_clusters<O: Clone>(
                                     None,
                                 )),
                             ),
-                            attributes: vec![
-                                Attribute(
-                                    Id::Plain(String::from("style")),
-                                    Id::Plain(String::from("dotted")),
-                                ),
-                                Attribute(
-                                    Id::Plain(String::from("dir")),
-                                    Id::Plain(String::from("none")),
-                                ),
-                            ],
+                            attributes: vec![Attribute(
+                                Id::Plain(String::from("style")),
+                                Id::Plain(String::from("dotted")),
+                            )],
                         };
                         stmts.push(Stmt::Edge(edge));
                     }
@@ -752,8 +734,8 @@ fn generate_edge_clusters<O: Clone>(
                             )),
                         ),
                         attributes: vec![Attribute(
-                            Id::Plain(String::from("lhead")),
-                            Id::Plain(cluster_id_for_edges.clone()),
+                            Id::Plain(String::from("style")),
+                            Id::Plain(String::from("dotted")),
                         )],
                     };
                     stmts.push(Stmt::Edge(edge));
@@ -772,8 +754,8 @@ fn generate_edge_clusters<O: Clone>(
                             )),
                         ),
                         attributes: vec![Attribute(
-                            Id::Plain(String::from("ltail")),
-                            Id::Plain(cluster_id_for_edges.clone()),
+                            Id::Plain(String::from("style")),
+                            Id::Plain(String::from("dotted")),
                         )],
                     };
                     stmts.push(Stmt::Edge(edge));
@@ -782,9 +764,6 @@ fn generate_edge_clusters<O: Clone>(
                     cluster.add_stmt(stmt);
                 }
                 for stmt in generate_edge_stmts(&child, &child_opts, &child_prefix) {
-                    cluster.add_stmt(stmt);
-                }
-                for stmt in generate_interface_stmts(&child, &child_prefix) {
                     cluster.add_stmt(stmt);
                 }
                 for stmt in generate_connection_stmts(&child, &child_prefix) {
@@ -877,16 +856,10 @@ fn generate_edge_clusters<O: Clone>(
                                 None,
                             )),
                         ),
-                        attributes: vec![
-                            Attribute(
-                                Id::Plain(String::from("style")),
-                                Id::Plain(String::from("dotted")),
-                            ),
-                            Attribute(
-                                Id::Plain(String::from("dir")),
-                                Id::Plain(String::from("none")),
-                            ),
-                        ],
+                        attributes: vec![Attribute(
+                            Id::Plain(String::from("style")),
+                            Id::Plain(String::from("dotted")),
+                        )],
                     };
                     stmts.push(Stmt::Edge(edge));
                 }
@@ -902,16 +875,10 @@ fn generate_edge_clusters<O: Clone>(
                                 None,
                             )),
                         ),
-                        attributes: vec![
-                            Attribute(
-                                Id::Plain(String::from("style")),
-                                Id::Plain(String::from("dotted")),
-                            ),
-                            Attribute(
-                                Id::Plain(String::from("dir")),
-                                Id::Plain(String::from("none")),
-                            ),
-                        ],
+                        attributes: vec![Attribute(
+                            Id::Plain(String::from("style")),
+                            Id::Plain(String::from("dotted")),
+                        )],
                     };
                     stmts.push(Stmt::Edge(edge));
                 }
