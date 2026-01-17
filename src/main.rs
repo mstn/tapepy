@@ -23,6 +23,7 @@ use graphviz_rust::printer::{DotPrinter, PrinterContext};
 use open_hypergraphs::lax::OpenHypergraph;
 use open_hypergraphs_dot::Options;
 use rustpython_parser::{ast, Parse};
+use solver::{apply_substitution, solve_hypergraph_types};
 
 fn main() -> Result<(), Box<dyn Error>> {
     let input = std::env::args().skip(1).collect::<Vec<_>>().join(" ");
@@ -56,7 +57,13 @@ fn main() -> Result<(), Box<dyn Error>> {
     };
 
     write_svg_with_fallback("./out", &term, &opts)?;
-    let strict_term = term.map_edges(|edge| OpenHypergraph::from_strict(edge.to_strict()));
+    let strict_term = term.map_edges(|edge| {
+        let subst = solve_hypergraph_types(&edge).unwrap_or_else(|err| {
+            panic!("type solving failed for embedded circuit: {}", err)
+        });
+        let solved = apply_substitution(&edge, &subst);
+        OpenHypergraph::from_strict(solved.to_strict())
+    });
     let strict = strict_term.to_strict();
     let strict_lax = OpenHypergraph::from_strict(strict);
     write_svg_with_fallback("./out_strict", &strict_lax, &opts)?;
