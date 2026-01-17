@@ -15,7 +15,7 @@ mod typing;
 
 use std::error::Error;
 
-use command_dot::{generate_dot_with_clusters, to_svg_with_clusters};
+use command_dot::{generate_dot_with_embedded_clusters, to_svg_with_embedded_clusters};
 use command_edge::CommandEdge;
 use command_tape::tape_from_command;
 use command_typing::infer_command_from_suite;
@@ -23,7 +23,6 @@ use graphviz_rust::printer::{DotPrinter, PrinterContext};
 use open_hypergraphs::lax::OpenHypergraph;
 use open_hypergraphs_dot::Options;
 use rustpython_parser::{ast, Parse};
-use solver::{apply_substitution, solve_hypergraph_types};
 
 fn main() -> Result<(), Box<dyn Error>> {
     let input = std::env::args().skip(1).collect::<Vec<_>>().join(" ");
@@ -50,23 +49,14 @@ fn main() -> Result<(), Box<dyn Error>> {
         types::TypeExpr::Var(types::TypeVar(id))
     });
 
-    let graph = term
-        .map_nodes(|mono| types::TypeExpr::Named(format!("{}", mono)))
-        .map_edges(|edge| {
-            let child = edge
-                .map_nodes(|mono| types::TypeExpr::Named(format!("{}", mono)))
-                .map_edges(|gen| CommandEdge::Atom(gen.to_string()));
-            CommandEdge::Embedded(Box::new(child))
-        });
-
     let opts = Options {
-        node_label: Box::new(|t: &types::TypeExpr| t.to_string()),
+        node_label: Box::new(|mono: &tape_language::Monomial<types::TypeExpr>| mono.to_string()),
         edge_label: Box::new(|e: &CommandEdge| e.to_string()),
         ..Options::default()
     };
 
-    write_svg_with_fallback("./out", &graph, &opts)?;
-    let strict = graph.to_strict();
+    write_svg_with_fallback("./out", &term, &opts)?;
+    let strict = term.to_strict();
     let strict_lax = OpenHypergraph::from_strict(strict);
     write_svg_with_fallback("./out_strict", &strict_lax, &opts)?;
 
@@ -74,18 +64,18 @@ fn main() -> Result<(), Box<dyn Error>> {
     Ok(())
 }
 
-fn write_svg_with_fallback(
+fn write_svg_with_fallback<O: Clone, E: Clone + std::fmt::Display>(
     prefix: &str,
-    graph: &OpenHypergraph<types::TypeExpr, CommandEdge>,
-    opts: &Options<types::TypeExpr, CommandEdge>,
+    graph: &OpenHypergraph<O, OpenHypergraph<types::TypeExpr, E>>,
+    opts: &Options<O, CommandEdge>,
 ) -> Result<(), Box<dyn Error>> {
     let svg_path = format!("{}.svg", prefix);
     let dot_path = format!("{}.dot", prefix);
-    let dot_graph = generate_dot_with_clusters(graph, opts);
+    let dot_graph = generate_dot_with_embedded_clusters(graph, opts);
     let mut ctx = PrinterContext::default();
     let dot_string = dot_graph.print(&mut ctx);
     std::fs::write(&dot_path, dot_string)?;
-    match to_svg_with_clusters(graph, opts) {
+    match to_svg_with_embedded_clusters(graph, opts) {
         Ok(svg) => {
             std::fs::write(svg_path, svg)?;
         }

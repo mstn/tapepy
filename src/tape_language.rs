@@ -69,6 +69,12 @@ impl<S> Monomial<S> {
     }
 }
 
+impl<S> From<S> for Monomial<S> {
+    fn from(sort: S) -> Self {
+        Monomial::atom(sort)
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum Polynomial<S> {
     Zero,

@@ -1,5 +1,5 @@
 use crate::command_typing::{CommandChild, CommandDerivationTree, CommandForm};
-use crate::expression_circuit::{self, circuit_from_expr_with_context, ExprGenerator};
+use crate::expression_circuit::{self, ExprGenerator};
 use crate::predicate_tape::tape_from_predicate;
 use crate::tape_language::{Circuit, Monomial, Tape};
 use crate::types::TypeExpr;

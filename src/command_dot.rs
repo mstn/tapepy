@@ -1,3 +1,5 @@
+use std::fmt;
+
 use graphviz_rust::dot_structures::{
     Attribute, Edge, EdgeTy, Graph, Id, Node, NodeId, Port, Stmt, Subgraph, Vertex,
 };
@@ -7,14 +9,14 @@ use graphviz_rust::{
     printer::PrinterContext,
 };
 use open_hypergraphs::lax::OpenHypergraph;
-use open_hypergraphs_dot::Options;
+use open_hypergraphs_dot::{Options, Theme};
 
 use crate::command_edge::CommandEdge;
 use crate::types::TypeExpr;
 
-pub fn to_svg_with_clusters(
-    graph: &OpenHypergraph<TypeExpr, CommandEdge>,
-    opts: &Options<TypeExpr, CommandEdge>,
+pub fn to_svg_with_clusters<O: Clone>(
+    graph: &OpenHypergraph<O, CommandEdge>,
+    opts: &Options<O, CommandEdge>,
 ) -> Result<Vec<u8>, std::io::Error> {
     let dot_graph = generate_dot_with_clusters(graph, opts);
     exec(
@@ -24,9 +26,9 @@ pub fn to_svg_with_clusters(
     )
 }
 
-pub fn generate_dot_with_clusters(
-    graph: &OpenHypergraph<TypeExpr, CommandEdge>,
-    opts: &Options<TypeExpr, CommandEdge>,
+pub fn generate_dot_with_clusters<O: Clone>(
+    graph: &OpenHypergraph<O, CommandEdge>,
+    opts: &Options<O, CommandEdge>,
 ) -> Graph {
     let theme = &opts.theme;
 
@@ -94,10 +96,35 @@ pub fn generate_dot_with_clusters(
     dot_graph
 }
 
-fn extend_graph(
+pub fn to_svg_with_embedded_clusters<O: Clone, E: Clone + fmt::Display>(
+    graph: &OpenHypergraph<O, OpenHypergraph<TypeExpr, E>>,
+    opts: &Options<O, CommandEdge>,
+) -> Result<Vec<u8>, std::io::Error> {
+    let dot_graph = generate_dot_with_embedded_clusters(graph, opts);
+    exec(
+        dot_graph,
+        &mut PrinterContext::default(),
+        vec![CommandArg::Format(Format::Svg)],
+    )
+}
+
+pub fn generate_dot_with_embedded_clusters<O: Clone, E: Clone + fmt::Display>(
+    graph: &OpenHypergraph<O, OpenHypergraph<TypeExpr, E>>,
+    opts: &Options<O, CommandEdge>,
+) -> Graph {
+    let wrapped = graph.clone().map_edges(|edge| {
+        let child = edge
+            .clone()
+            .map_edges(|gen| CommandEdge::Atom(gen.to_string()));
+        CommandEdge::Embedded(Box::new(child))
+    });
+    generate_dot_with_clusters(&wrapped, opts)
+}
+
+fn extend_graph<O: Clone>(
     dot_graph: &mut Graph,
-    graph: &OpenHypergraph<TypeExpr, CommandEdge>,
-    opts: &Options<TypeExpr, CommandEdge>,
+    graph: &OpenHypergraph<O, CommandEdge>,
+    opts: &Options<O, CommandEdge>,
     prefix: String,
 ) {
     for stmt in generate_node_stmts(graph, opts, &prefix) {
@@ -120,7 +147,7 @@ fn extend_graph(
     }
 }
 
-fn edge_label(edge: &CommandEdge, opts: &Options<TypeExpr, CommandEdge>) -> String {
+fn edge_label<O>(edge: &CommandEdge, opts: &Options<O, CommandEdge>) -> String {
     match edge {
         CommandEdge::Atom(_) => (opts.edge_label)(edge),
         CommandEdge::Convolution(_) => "Convolution".to_string(),
@@ -129,9 +156,23 @@ fn edge_label(edge: &CommandEdge, opts: &Options<TypeExpr, CommandEdge>) -> Stri
     }
 }
 
-fn generate_node_stmts(
-    graph: &OpenHypergraph<TypeExpr, CommandEdge>,
-    opts: &Options<TypeExpr, CommandEdge>,
+fn child_opts_from_parent<O>(opts: &Options<O, CommandEdge>) -> Options<TypeExpr, CommandEdge> {
+    Options {
+        orientation: opts.orientation,
+        theme: Theme {
+            bgcolor: opts.theme.bgcolor.clone(),
+            fontcolor: opts.theme.fontcolor.clone(),
+            color: opts.theme.color.clone(),
+            orientation: opts.theme.orientation,
+        },
+        node_label: Box::new(|n: &TypeExpr| n.to_string()),
+        edge_label: Box::new(|e: &CommandEdge| e.to_string()),
+    }
+}
+
+fn generate_node_stmts<O: Clone>(
+    graph: &OpenHypergraph<O, CommandEdge>,
+    opts: &Options<O, CommandEdge>,
     prefix: &str,
 ) -> Vec<Stmt> {
     let mut stmts = Vec::new();
@@ -155,9 +196,9 @@ fn generate_node_stmts(
     stmts
 }
 
-fn generate_edge_stmts(
-    graph: &OpenHypergraph<TypeExpr, CommandEdge>,
-    opts: &Options<TypeExpr, CommandEdge>,
+fn generate_edge_stmts<O: Clone>(
+    graph: &OpenHypergraph<O, CommandEdge>,
+    opts: &Options<O, CommandEdge>,
     prefix: &str,
 ) -> Vec<Stmt> {
     let mut stmts = Vec::new();
@@ -217,7 +258,6 @@ fn generate_edge_stmts(
                 }));
             }
             CommandEdge::Convolution(children) => {
-                let children = children.as_slice();
                 for (src_idx, &node_id) in hyperedge.sources.iter().enumerate() {
                     let label = (opts.node_label)(&graph.hypergraph.nodes[node_id.0]);
                     let label = escape_dot_label(&label);
@@ -309,8 +349,8 @@ fn generate_edge_stmts(
     stmts
 }
 
-fn generate_connection_stmts(
-    graph: &OpenHypergraph<TypeExpr, CommandEdge>,
+fn generate_connection_stmts<O: Clone>(
+    graph: &OpenHypergraph<O, CommandEdge>,
     prefix: &str,
 ) -> Vec<Stmt> {
     let mut stmts = Vec::new();
@@ -349,8 +389,8 @@ fn generate_connection_stmts(
     stmts
 }
 
-fn generate_interface_stmts(
-    graph: &OpenHypergraph<TypeExpr, CommandEdge>,
+fn generate_interface_stmts<O: Clone>(
+    graph: &OpenHypergraph<O, CommandEdge>,
     prefix: &str,
 ) -> Vec<Stmt> {
     let mut stmts = Vec::new();
@@ -462,8 +502,8 @@ fn generate_interface_stmts(
     stmts
 }
 
-fn generate_quotient_stmts(
-    graph: &OpenHypergraph<TypeExpr, CommandEdge>,
+fn generate_quotient_stmts<O: Clone>(
+    graph: &OpenHypergraph<O, CommandEdge>,
     prefix: &str,
 ) -> Vec<Stmt> {
     let mut stmts = Vec::new();
@@ -506,9 +546,9 @@ fn generate_quotient_stmts(
     stmts
 }
 
-fn generate_edge_clusters(
-    graph: &OpenHypergraph<TypeExpr, CommandEdge>,
-    opts: &Options<TypeExpr, CommandEdge>,
+fn generate_edge_clusters<O: Clone>(
+    graph: &OpenHypergraph<O, CommandEdge>,
+    opts: &Options<O, CommandEdge>,
     prefix: &str,
 ) -> Vec<Stmt> {
     let mut stmts = Vec::new();
@@ -518,6 +558,7 @@ fn generate_edge_clusters(
         match edge_label {
             CommandEdge::Atom(_) => continue,
             CommandEdge::Convolution(children) => {
+                let child_opts = child_opts_from_parent(opts);
                 let cluster_id = format!("cluster_{}e_{}", prefix, edge_idx);
                 let mut cluster = Subgraph {
                     id: Id::Plain(cluster_id.clone()),
@@ -541,16 +582,8 @@ fn generate_edge_clusters(
                     ],
                 };
 
-                let parent_sources = graph.hypergraph.adjacency[edge_idx]
-                    .sources
-                    .iter()
-                    .map(|id| graph.hypergraph.nodes[id.0].clone())
-                    .collect::<Vec<_>>();
-                let parent_targets = graph.hypergraph.adjacency[edge_idx]
-                    .targets
-                    .iter()
-                    .map(|id| graph.hypergraph.nodes[id.0].clone())
-                    .collect::<Vec<_>>();
+                let parent_sources_len = graph.hypergraph.adjacency[edge_idx].sources.len();
+                let parent_targets_len = graph.hypergraph.adjacency[edge_idx].targets.len();
                 for (j, &node_id) in graph.hypergraph.adjacency[edge_idx]
                     .sources
                     .iter()
@@ -594,7 +627,8 @@ fn generate_edge_clusters(
 
                 for (child_idx, child) in children.iter().enumerate() {
                     let child = child.clone();
-                    let child = normalize_interface_labels(child, &parent_sources, &parent_targets);
+                    let child =
+                        ensure_interface_lengths(child, parent_sources_len, parent_targets_len);
                     let child_prefix = format!("{}e_{}_c{}_", prefix, edge_idx, child_idx);
                     for (j, &child_source) in child.sources.iter().enumerate() {
                         let edge = Edge {
@@ -653,10 +687,10 @@ fn generate_edge_clusters(
                             Id::Plain(format!("\"alt {}\"", child_idx)),
                         ))],
                     };
-                    for stmt in generate_node_stmts(&child, opts, &child_prefix) {
+                    for stmt in generate_node_stmts(&child, &child_opts, &child_prefix) {
                         child_cluster.add_stmt(stmt);
                     }
-                    for stmt in generate_edge_stmts(&child, opts, &child_prefix) {
+                    for stmt in generate_edge_stmts(&child, &child_opts, &child_prefix) {
                         child_cluster.add_stmt(stmt);
                     }
                     for stmt in generate_interface_stmts(&child, &child_prefix) {
@@ -674,6 +708,7 @@ fn generate_edge_clusters(
                 stmts.push(Stmt::Subgraph(cluster));
             }
             CommandEdge::Embedded(child) => {
+                let child_opts = child_opts_from_parent(opts);
                 let cluster_id = format!("cluster_{}e_{}", prefix, edge_idx);
                 let cluster_id_for_edges = cluster_id.clone();
                 let mut cluster = Subgraph {
@@ -698,18 +733,10 @@ fn generate_edge_clusters(
                     ],
                 };
 
-                let parent_sources = graph.hypergraph.adjacency[edge_idx]
-                    .sources
-                    .iter()
-                    .map(|id| graph.hypergraph.nodes[id.0].clone())
-                    .collect::<Vec<_>>();
-                let parent_targets = graph.hypergraph.adjacency[edge_idx]
-                    .targets
-                    .iter()
-                    .map(|id| graph.hypergraph.nodes[id.0].clone())
-                    .collect::<Vec<_>>();
+                let parent_sources_len = graph.hypergraph.adjacency[edge_idx].sources.len();
+                let parent_targets_len = graph.hypergraph.adjacency[edge_idx].targets.len();
                 let child = child.as_ref().clone();
-                let child = normalize_interface_labels(child, &parent_sources, &parent_targets);
+                let child = ensure_interface_lengths(child, parent_sources_len, parent_targets_len);
                 let child_prefix = format!("{}e_{}_c0_", prefix, edge_idx);
                 for (j, &child_source) in child.sources.iter().enumerate() {
                     let parent_node = graph.hypergraph.adjacency[edge_idx].sources[j];
@@ -724,12 +751,10 @@ fn generate_edge_clusters(
                                 None,
                             )),
                         ),
-                        attributes: vec![
-                            Attribute(
-                                Id::Plain(String::from("lhead")),
-                                Id::Plain(cluster_id_for_edges.clone()),
-                            ),
-                        ],
+                        attributes: vec![Attribute(
+                            Id::Plain(String::from("lhead")),
+                            Id::Plain(cluster_id_for_edges.clone()),
+                        )],
                     };
                     stmts.push(Stmt::Edge(edge));
                 }
@@ -746,19 +771,17 @@ fn generate_edge_clusters(
                                 None,
                             )),
                         ),
-                        attributes: vec![
-                            Attribute(
-                                Id::Plain(String::from("ltail")),
-                                Id::Plain(cluster_id_for_edges.clone()),
-                            ),
-                        ],
+                        attributes: vec![Attribute(
+                            Id::Plain(String::from("ltail")),
+                            Id::Plain(cluster_id_for_edges.clone()),
+                        )],
                     };
                     stmts.push(Stmt::Edge(edge));
                 }
-                for stmt in generate_node_stmts(&child, opts, &child_prefix) {
+                for stmt in generate_node_stmts(&child, &child_opts, &child_prefix) {
                     cluster.add_stmt(stmt);
                 }
-                for stmt in generate_edge_stmts(&child, opts, &child_prefix) {
+                for stmt in generate_edge_stmts(&child, &child_opts, &child_prefix) {
                     cluster.add_stmt(stmt);
                 }
                 for stmt in generate_interface_stmts(&child, &child_prefix) {
@@ -773,6 +796,7 @@ fn generate_edge_clusters(
                 stmts.push(Stmt::Subgraph(cluster));
             }
             CommandEdge::Kleene(child) => {
+                let child_opts = child_opts_from_parent(opts);
                 let cluster_id = format!("cluster_{}e_{}", prefix, edge_idx);
                 let mut cluster = Subgraph {
                     id: Id::Plain(cluster_id.clone()),
@@ -796,16 +820,8 @@ fn generate_edge_clusters(
                     ],
                 };
 
-                let parent_sources = graph.hypergraph.adjacency[edge_idx]
-                    .sources
-                    .iter()
-                    .map(|id| graph.hypergraph.nodes[id.0].clone())
-                    .collect::<Vec<_>>();
-                let parent_targets = graph.hypergraph.adjacency[edge_idx]
-                    .targets
-                    .iter()
-                    .map(|id| graph.hypergraph.nodes[id.0].clone())
-                    .collect::<Vec<_>>();
+                let parent_sources_len = graph.hypergraph.adjacency[edge_idx].sources.len();
+                let parent_targets_len = graph.hypergraph.adjacency[edge_idx].targets.len();
                 for (j, &node_id) in graph.hypergraph.adjacency[edge_idx]
                     .sources
                     .iter()
@@ -847,7 +863,7 @@ fn generate_edge_clusters(
                     stmts.push(Stmt::Edge(edge));
                 }
                 let child = child.as_ref().clone();
-                let child = normalize_interface_labels(child, &parent_sources, &parent_targets);
+                let child = ensure_interface_lengths(child, parent_sources_len, parent_targets_len);
                 let child_prefix = format!("{}e_{}_k_", prefix, edge_idx);
                 for (j, &child_source) in child.sources.iter().enumerate() {
                     let edge = Edge {
@@ -906,10 +922,10 @@ fn generate_edge_clusters(
                         Id::Plain(String::from("\"body\"")),
                     ))],
                 };
-                for stmt in generate_node_stmts(&child, opts, &child_prefix) {
+                for stmt in generate_node_stmts(&child, &child_opts, &child_prefix) {
                     child_cluster.add_stmt(stmt);
                 }
-                for stmt in generate_edge_stmts(&child, opts, &child_prefix) {
+                for stmt in generate_edge_stmts(&child, &child_opts, &child_prefix) {
                     child_cluster.add_stmt(stmt);
                 }
                 for stmt in generate_interface_stmts(&child, &child_prefix) {
@@ -946,26 +962,20 @@ fn escape_dot_label(s: &str) -> String {
         .collect()
 }
 
-fn normalize_interface_labels(
-    mut graph: OpenHypergraph<TypeExpr, CommandEdge>,
-    parent_sources: &[TypeExpr],
-    parent_targets: &[TypeExpr],
-) -> OpenHypergraph<TypeExpr, CommandEdge> {
-    if graph.sources.len() != parent_sources.len() || graph.targets.len() != parent_targets.len() {
+fn ensure_interface_lengths<O>(
+    graph: OpenHypergraph<O, CommandEdge>,
+    parent_sources_len: usize,
+    parent_targets_len: usize,
+) -> OpenHypergraph<O, CommandEdge> {
+    if graph.sources.len() != parent_sources_len || graph.targets.len() != parent_targets_len {
         panic!(
             "subgraph interface mismatch: expected {} -> {}, got {} -> {}",
-            parent_sources.len(),
-            parent_targets.len(),
+            parent_sources_len,
+            parent_targets_len,
             graph.sources.len(),
             graph.targets.len()
         );
     }
 
-    for (node_id, ty) in graph.sources.iter().zip(parent_sources.iter()) {
-        graph.hypergraph.nodes[node_id.0] = ty.clone();
-    }
-    for (node_id, ty) in graph.targets.iter().zip(parent_targets.iter()) {
-        graph.hypergraph.nodes[node_id.0] = ty.clone();
-    }
     graph
 }

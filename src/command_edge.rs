@@ -2,7 +2,6 @@ use std::fmt;
 
 use open_hypergraphs::lax::OpenHypergraph;
 
-use crate::hypergraph::format_hypergraph;
 use crate::types::TypeExpr;
 
 #[derive(Debug, Clone, PartialEq)]
