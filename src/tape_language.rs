@@ -380,47 +380,46 @@ impl<S: Clone + PartialEq, G: GeneratorShape + GeneratorTypes<S> + Clone> Tape<S
     pub fn to_hypergraph(
         &self,
         fresh_sort: &mut impl FnMut() -> S,
-    ) -> OpenHypergraph<Monomial<S>, Circuit<Monomial<S>, G>> {
+    ) -> OpenHypergraph<Monomial<S>, OpenHypergraph<S, G>> {
         match self {
             Tape::Id(mono) => OpenHypergraph::identity(monomial_atoms(mono)),
             Tape::IdZero => OpenHypergraph::empty(),
-            Tape::EmbedCircuit(circuit) => {
-                match circuit.as_ref() {
-                    Circuit::Id(sort) => {
-                        OpenHypergraph::identity(vec![Monomial::atom(sort.clone())])
+            Tape::EmbedCircuit(circuit) => match circuit.as_ref() {
+                Circuit::Id(sort) => OpenHypergraph::identity(vec![Monomial::atom(sort.clone())]),
+                Circuit::IdOne => OpenHypergraph::empty(),
+                _ => {
+                    let child_graph = circuit.to_hypergraph(fresh_sort);
+                    let nodes = &child_graph.hypergraph.nodes;
+                    let mut sources = Vec::with_capacity(child_graph.sources.len());
+                    for node_id in &child_graph.sources {
+                        sources.push(Monomial::atom(nodes[node_id.0].clone()));
                     }
-                    Circuit::IdOne => OpenHypergraph::empty(),
-                    _ => {
-                        embed_circuit(circuit, fresh_sort)
+                    let mut targets = Vec::with_capacity(child_graph.targets.len());
+                    for node_id in &child_graph.targets {
+                        targets.push(Monomial::atom(nodes[node_id.0].clone()));
                     }
+                    OpenHypergraph::singleton(child_graph, sources, targets)
                 }
-            }
+            },
             Tape::Swap { left, right } => {
                 let mut graph = OpenHypergraph::empty();
                 let left_nodes = add_nodes(&mut graph, &monomial_atoms(left));
                 let right_nodes = add_nodes(&mut graph, &monomial_atoms(right));
-                graph.sources = left_nodes.iter().chain(right_nodes.iter()).copied().collect();
-                graph.targets = right_nodes.into_iter().chain(left_nodes.into_iter()).collect();
+                graph.sources = left_nodes
+                    .iter()
+                    .chain(right_nodes.iter())
+                    .copied()
+                    .collect();
+                graph.targets = right_nodes
+                    .into_iter()
+                    .chain(left_nodes.into_iter())
+                    .collect();
                 graph
             }
             Tape::Seq(left, right) => match (left.as_ref(), right.as_ref()) {
                 (Tape::EmbedCircuit(left_c), Tape::EmbedCircuit(right_c)) => {
-                    if let (Some((left_in, left_out)), Some((right_in, right_out))) =
-                        (left_c.io_types(), right_c.io_types())
-                    {
-                        if left_out == right_in {
-                            let composed = Circuit::Seq(left_c.clone(), right_c.clone());
-                            embed_circuit(&composed, fresh_sort)
-                        } else {
-                            let left_graph = left.to_hypergraph(fresh_sort);
-                            let right_graph = right.to_hypergraph(fresh_sort);
-                            compose_lax_unchecked(&left_graph, &right_graph)
-                        }
-                    } else {
-                        let left_graph = left.to_hypergraph(fresh_sort);
-                        let right_graph = right.to_hypergraph(fresh_sort);
-                        compose_lax_unchecked(&left_graph, &right_graph)
-                    }
+                    Tape::EmbedCircuit(Box::new(Circuit::Seq(left_c.clone(), right_c.clone())))
+                        .to_hypergraph(fresh_sort)
                 }
                 _ => {
                     let left_graph = left.to_hypergraph(fresh_sort);
@@ -463,13 +462,8 @@ impl<S: Clone + PartialEq, G: GeneratorShape + GeneratorTypes<S> + Clone> Tape<S
     }
 }
 
-fn fresh_monomials<S>(
-    fresh_sort: &mut impl FnMut() -> S,
-    count: usize,
-) -> Vec<Monomial<S>> {
-    (0..count)
-        .map(|_| Monomial::atom(fresh_sort()))
-        .collect()
+fn fresh_monomials<S>(fresh_sort: &mut impl FnMut() -> S, count: usize) -> Vec<Monomial<S>> {
+    (0..count).map(|_| Monomial::atom(fresh_sort())).collect()
 }
 
 fn embed_circuit<S: Clone + PartialEq, G: GeneratorShape + GeneratorTypes<S> + Clone>(
@@ -509,7 +503,10 @@ fn add_nodes<S: Clone, G>(
     graph: &mut OpenHypergraph<S, G>,
     labels: &[S],
 ) -> Vec<open_hypergraphs::lax::NodeId> {
-    labels.iter().map(|label| graph.new_node(label.clone())).collect()
+    labels
+        .iter()
+        .map(|label| graph.new_node(label.clone()))
+        .collect()
 }
 
 fn lift_circuit<S: Clone, G: Clone>(circuit: &Circuit<S, G>) -> Circuit<Monomial<S>, G> {
@@ -521,14 +518,12 @@ fn lift_circuit<S: Clone, G: Clone>(circuit: &Circuit<S, G>) -> Circuit<Monomial
             left: Monomial::atom(left.clone()),
             right: Monomial::atom(right.clone()),
         },
-        Circuit::Seq(left, right) => Circuit::Seq(
-            Box::new(lift_circuit(left)),
-            Box::new(lift_circuit(right)),
-        ),
-        Circuit::Product(left, right) => Circuit::Product(
-            Box::new(lift_circuit(left)),
-            Box::new(lift_circuit(right)),
-        ),
+        Circuit::Seq(left, right) => {
+            Circuit::Seq(Box::new(lift_circuit(left)), Box::new(lift_circuit(right)))
+        }
+        Circuit::Product(left, right) => {
+            Circuit::Product(Box::new(lift_circuit(left)), Box::new(lift_circuit(right)))
+        }
         Circuit::Copy(sort) => Circuit::Copy(Monomial::atom(sort.clone())),
         Circuit::Discard(sort) => Circuit::Discard(Monomial::atom(sort.clone())),
         Circuit::Join(sort) => Circuit::Join(Monomial::atom(sort.clone())),
@@ -540,11 +535,7 @@ fn fresh_sorts<S, F: FnMut() -> S>(fresh_sort: &mut F, count: usize) -> Vec<S> {
 }
 
 fn permute_circuit<S: Clone, G>(types: &[S], permutation: &[usize]) -> Circuit<S, G> {
-    if permutation
-        .iter()
-        .enumerate()
-        .all(|(idx, val)| idx == *val)
-    {
+    if permutation.iter().enumerate().all(|(idx, val)| idx == *val) {
         return identity_for_types(types);
     }
 

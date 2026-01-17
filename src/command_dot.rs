@@ -10,7 +10,6 @@ use open_hypergraphs::lax::OpenHypergraph;
 use open_hypergraphs_dot::Options;
 
 use crate::command_edge::CommandEdge;
-use crate::solver::{apply_substitution, solve_hypergraph_types};
 use crate::types::TypeExpr;
 
 pub fn to_svg_with_clusters(
@@ -594,7 +593,7 @@ fn generate_edge_clusters(
                 }
 
                 for (child_idx, child) in children.iter().enumerate() {
-                    let child = strictify(child);
+                    let child = child.clone();
                     let child = normalize_interface_labels(child, &parent_sources, &parent_targets);
                     let child_prefix = format!("{}e_{}_c{}_", prefix, edge_idx, child_idx);
                     for (j, &child_source) in child.sources.iter().enumerate() {
@@ -709,7 +708,7 @@ fn generate_edge_clusters(
                     .iter()
                     .map(|id| graph.hypergraph.nodes[id.0].clone())
                     .collect::<Vec<_>>();
-                let child = strictify(child);
+                let child = child.as_ref().clone();
                 let child = normalize_interface_labels(child, &parent_sources, &parent_targets);
                 let child_prefix = format!("{}e_{}_c0_", prefix, edge_idx);
                 for (j, &child_source) in child.sources.iter().enumerate() {
@@ -847,7 +846,7 @@ fn generate_edge_clusters(
                     };
                     stmts.push(Stmt::Edge(edge));
                 }
-                let child = strictify(child);
+                let child = child.as_ref().clone();
                 let child = normalize_interface_labels(child, &parent_sources, &parent_targets);
                 let child_prefix = format!("{}e_{}_k_", prefix, edge_idx);
                 for (j, &child_source) in child.sources.iter().enumerate() {
@@ -945,17 +944,6 @@ fn escape_dot_label(s: &str) -> String {
             _ => Some(c.to_string()),
         })
         .collect()
-}
-
-fn strictify(
-    graph: &OpenHypergraph<TypeExpr, CommandEdge>,
-) -> OpenHypergraph<TypeExpr, CommandEdge> {
-    let resolved = match solve_hypergraph_types(graph) {
-        Ok(subst) => apply_substitution(graph, &subst),
-        Err(_) => graph.clone(),
-    };
-    let strict = resolved.to_strict();
-    OpenHypergraph::from_strict(strict)
 }
 
 fn normalize_interface_labels(
