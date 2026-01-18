@@ -16,7 +16,7 @@ mod typing;
 
 use std::error::Error;
 
-use command_dot::{generate_dot_with_embedded_clusters, to_svg_with_embedded_clusters};
+use command_dot::{generate_dot_with_tape_clusters, to_svg_with_tape_clusters};
 use command_edge::CommandEdge;
 use command_tape::tape_from_command;
 use command_typing::infer_command_from_suite;
@@ -65,18 +65,21 @@ fn main() -> Result<(), Box<dyn Error>> {
     Ok(())
 }
 
-fn write_svg_with_fallback<O: Clone, E: Clone + std::fmt::Display>(
+fn write_svg_with_fallback<E: Clone + std::fmt::Display>(
     prefix: &str,
-    graph: &OpenHypergraph<O, OpenHypergraph<types::TypeExpr, E>>,
-    opts: &Options<O, CommandEdge>,
+    graph: &OpenHypergraph<
+        tape_language::Monomial<types::TypeExpr>,
+        tape_language::TapeEdge<types::TypeExpr, E>,
+    >,
+    opts: &Options<tape_language::Monomial<types::TypeExpr>, CommandEdge>,
 ) -> Result<(), Box<dyn Error>> {
     let svg_path = format!("{}.svg", prefix);
     let dot_path = format!("{}.dot", prefix);
-    let dot_graph = generate_dot_with_embedded_clusters(graph, opts);
+    let dot_graph = generate_dot_with_tape_clusters(graph, opts);
     let mut ctx = PrinterContext::default();
     let dot_string = dot_graph.print(&mut ctx);
     std::fs::write(&dot_path, dot_string)?;
-    match to_svg_with_embedded_clusters(graph, opts) {
+    match to_svg_with_tape_clusters(graph, opts) {
         Ok(svg) => {
             std::fs::write(svg_path, svg)?;
         }

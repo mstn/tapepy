@@ -147,6 +147,33 @@ pub enum Tape<S, G> {
     Merge(Monomial<S>),
 }
 
+#[derive(Debug, Clone, PartialEq)]
+pub enum TapeEdge<S, G> {
+    Embedded(OpenHypergraph<S, G>),
+    Product(
+        Box<OpenHypergraph<Monomial<S>, TapeEdge<S, G>>>,
+        Box<OpenHypergraph<Monomial<S>, TapeEdge<S, G>>>,
+    ),
+}
+
+impl<S: fmt::Display, G: fmt::Display> fmt::Display for TapeEdge<S, G> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            TapeEdge::Embedded(child) => {
+                write!(f, "Embed({}x{})", child.sources.len(), child.targets.len())
+            }
+            TapeEdge::Product(left, right) => write!(
+                f,
+                "Product({}x{}, {}x{})",
+                left.sources.len(),
+                left.targets.len(),
+                right.sources.len(),
+                right.targets.len()
+            ),
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CircuitArity {
     pub inputs: usize,
@@ -452,7 +479,7 @@ impl<S: Clone + PartialEq, G: GeneratorShape + GeneratorTypes<S> + Clone> Tape<S
     pub fn to_hypergraph(
         &self,
         fresh_sort: &mut impl FnMut() -> S,
-    ) -> OpenHypergraph<Monomial<S>, OpenHypergraph<S, G>> {
+    ) -> OpenHypergraph<Monomial<S>, TapeEdge<S, G>> {
         match self {
             Tape::Id(mono) => OpenHypergraph::identity(monomial_atoms(mono)),
             Tape::IdZero => OpenHypergraph::empty(),
@@ -470,7 +497,11 @@ impl<S: Clone + PartialEq, G: GeneratorShape + GeneratorTypes<S> + Clone> Tape<S
                     for node_id in &child_graph.targets {
                         targets.push(Monomial::atom(nodes[node_id.0].clone()));
                     }
-                    OpenHypergraph::singleton(child_graph, sources, targets)
+                    OpenHypergraph::singleton(
+                        TapeEdge::Embedded(child_graph),
+                        sources,
+                        targets,
+                    )
                 }
             },
             Tape::Swap { left, right } => {
@@ -496,7 +527,15 @@ impl<S: Clone + PartialEq, G: GeneratorShape + GeneratorTypes<S> + Clone> Tape<S
             Tape::Product(left, right) => {
                 let left_graph = left.to_hypergraph(fresh_sort);
                 let right_graph = right.to_hypergraph(fresh_sort);
-                left_graph.tensor(&right_graph)
+                let mut sources = interface_labels(&left_graph, &left_graph.sources);
+                sources.extend(interface_labels(&right_graph, &right_graph.sources));
+                let mut targets = interface_labels(&left_graph, &left_graph.targets);
+                targets.extend(interface_labels(&right_graph, &right_graph.targets));
+                OpenHypergraph::singleton(
+                    TapeEdge::Product(Box::new(left_graph), Box::new(right_graph)),
+                    sources,
+                    targets,
+                )
             }
             Tape::Sum(left, right) => {
                 let left_graph = left.to_hypergraph(fresh_sort);
@@ -531,6 +570,16 @@ impl<S: Clone + PartialEq, G: GeneratorShape + GeneratorTypes<S> + Clone> Tape<S
             }
         }
     }
+}
+
+fn interface_labels<S: Clone, G>(
+    graph: &OpenHypergraph<Monomial<S>, G>,
+    nodes: &[open_hypergraphs::lax::NodeId],
+) -> Vec<Monomial<S>> {
+    nodes
+        .iter()
+        .map(|node_id| graph.hypergraph.nodes[node_id.0].clone())
+        .collect()
 }
 
 fn fresh_monomials<S>(fresh_sort: &mut impl FnMut() -> S, count: usize) -> Vec<Monomial<S>> {
