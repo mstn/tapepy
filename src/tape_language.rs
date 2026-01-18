@@ -219,6 +219,41 @@ impl<S, G: GeneratorShape> Circuit<S, G> {
         Circuit::Seq(Box::new(acc), Box::new(permute))
     }
 
+    pub fn join_n(terms: Vec<S>) -> Self
+    where
+        S: Clone,
+    {
+        if terms.is_empty() {
+            return Circuit::IdOne;
+        }
+
+        let mut joins: Vec<Self> = terms.iter().cloned().map(Circuit::Join).collect();
+        let mut acc = joins.remove(0);
+        for circuit in joins {
+            acc = Circuit::Product(Box::new(acc), Box::new(circuit));
+        }
+
+        if terms.len() == 1 {
+            return acc;
+        }
+
+        let mut grouped_types = Vec::with_capacity(terms.len() * 2);
+        for term in &terms {
+            grouped_types.push(term.clone());
+            grouped_types.push(term.clone());
+        }
+        let mut permutation = Vec::with_capacity(terms.len() * 2);
+        for i in 0..terms.len() {
+            permutation.push(2 * i);
+        }
+        for i in 0..terms.len() {
+            permutation.push(2 * i + 1);
+        }
+
+        let permute = permute_circuit(&grouped_types, &permutation);
+        Circuit::Seq(Box::new(permute), Box::new(acc))
+    }
+
     pub fn typing(&self) -> CircuitArity {
         match self {
             Circuit::Id(_) => CircuitArity::new(1, 1),
