@@ -100,11 +100,8 @@ fn if_tape(tree: &CommandDerivationTree) -> Tape<TypeExpr, ExprGenerator> {
     let pred_tape = tape_from_predicate(pred);
     let neg_pred_tape = tape_from_predicate_with_negation(pred, true);
 
-    let left_control = gate_tape(&context, pred_tape);
-    let right_control = gate_tape(&context, neg_pred_tape);
-
-    let left = Tape::Seq(Box::new(left_control), Box::new(then_tape));
-    let right = Tape::Seq(Box::new(right_control), Box::new(else_tape));
+    let left = gate_tape(&context, pred_tape, then_tape);
+    let right = gate_tape(&context, neg_pred_tape, else_tape);
 
     let context_types = monomial_atoms(&context)
         .into_iter()
@@ -127,6 +124,7 @@ fn if_tape(tree: &CommandDerivationTree) -> Tape<TypeExpr, ExprGenerator> {
 fn gate_tape(
     context: &Monomial<TypeExpr>,
     pred_tape: Tape<TypeExpr, ExprGenerator>,
+    exec_tape: Tape<TypeExpr, ExprGenerator>,
 ) -> Tape<TypeExpr, ExprGenerator> {
     let context_types = monomial_atoms(&context)
         .into_iter()
@@ -140,10 +138,7 @@ fn gate_tape(
     let copy = Tape::EmbedCircuit(Box::new(Circuit::copy_n(context_types)));
     Tape::Seq(
         Box::new(copy),
-        Box::new(Tape::Product(
-            Box::new(pred_tape),
-            Box::new(Tape::Id(context.clone())),
-        )),
+        Box::new(Tape::Product(Box::new(pred_tape), Box::new(exec_tape))),
     )
 }
 
