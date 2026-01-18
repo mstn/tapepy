@@ -106,15 +106,19 @@ fn if_tape(tree: &CommandDerivationTree) -> Tape<TypeExpr, ExprGenerator> {
     let left = Tape::Seq(Box::new(left_control), Box::new(then_tape));
     let right = Tape::Seq(Box::new(right_control), Box::new(else_tape));
 
-    let copy = Tape::EmbedCircuit(Box::new(Circuit::copy_n(vec![])));
-    let join = Tape::EmbedCircuit(Box::new(Circuit::join_n(vec![])));
-    Tape::Seq(
-        Box::new(copy),
-        Box::new(Tape::Seq(
-            Box::new(Tape::Sum(Box::new(left), Box::new(right))),
-            Box::new(join),
-        )),
-    )
+    let context_types = monomial_atoms(&context)
+        .into_iter()
+        .map(|mono| match mono {
+            Monomial::Atom(ty) => ty,
+            Monomial::One | Monomial::Product(_, _) => {
+                panic!("context monomial atoms must be flat")
+            }
+        })
+        .collect::<Vec<_>>();
+    let copy = Tape::EmbedCircuit(Box::new(Circuit::copy_n(context_types.clone())));
+    let join = Tape::EmbedCircuit(Box::new(Circuit::join_n(context_types)));
+    let branches = Tape::Product(Box::new(left), Box::new(right));
+    Tape::Seq(Box::new(copy), Box::new(Tape::Seq(Box::new(branches), Box::new(join))))
 }
 
 fn gate_tape(

@@ -63,9 +63,9 @@ fn main() -> Result<(), Box<dyn Error>> {
         let solved = apply_substitution(&edge, &subst);
         OpenHypergraph::from_strict(solved.to_strict())
     });
-    // let strict = strict_term.to_strict();
-    // let strict_lax = OpenHypergraph::from_strict(strict);
-    // write_svg_with_fallback("./out_strict", &strict_lax, &opts)?;
+    let strict = strict_term.to_strict();
+    let strict_lax = OpenHypergraph::from_strict(strict);
+    write_svg_with_fallback("./out_strict", &strict_lax, &opts)?;
 
     // Type solving is only available for graphs with TypeExpr node labels.
     Ok(())
