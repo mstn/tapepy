@@ -67,8 +67,69 @@ pub fn solve_hypergraph_types<A: Clone>(
     let choices = collect_choices(graph);
 
     let mut assignment = HashMap::new();
-    if backtrack_solve(&vars_list, 0, &mut assignment, &constraints, graph, &choices) {
-        Ok(TypeSubstitution { mapping: assignment })
+    if backtrack_solve(
+        &vars_list,
+        0,
+        &mut assignment,
+        &constraints,
+        graph,
+        &choices,
+    ) {
+        Ok(TypeSubstitution {
+            mapping: assignment,
+        })
+    } else {
+        Err(SolveError::NoSolution)
+    }
+}
+
+pub fn solve_type_equations(
+    nodes: &[TypeExpr],
+    constraints: &[(TypeExpr, TypeExpr)],
+) -> Result<TypeSubstitution, SolveError> {
+    let mut vars = HashSet::new();
+    for expr in nodes {
+        collect_vars_expr(expr, &mut vars);
+    }
+    for (lhs, rhs) in constraints {
+        collect_vars_expr(lhs, &mut vars);
+        collect_vars_expr(rhs, &mut vars);
+    }
+    let vars_list: Vec<TypeVar> = vars.into_iter().collect();
+
+    let mut choices = vec![
+        TypeExpr::Bool,
+        TypeExpr::Unit,
+        TypeExpr::Int,
+        TypeExpr::Float,
+    ];
+    let mut named = HashSet::new();
+    for expr in nodes {
+        collect_named_expr(expr, &mut named);
+    }
+    for (lhs, rhs) in constraints {
+        collect_named_expr(lhs, &mut named);
+        collect_named_expr(rhs, &mut named);
+    }
+    for name in named {
+        choices.push(TypeExpr::Named(name));
+    }
+
+    let mut graph: OpenHypergraph<TypeExpr, ()> = OpenHypergraph::empty();
+    graph.hypergraph.nodes = nodes.to_vec();
+
+    let mut assignment = HashMap::new();
+    if backtrack_solve(
+        &vars_list,
+        0,
+        &mut assignment,
+        constraints,
+        &graph,
+        &choices,
+    ) {
+        Ok(TypeSubstitution {
+            mapping: assignment,
+        })
     } else {
         Err(SolveError::NoSolution)
     }
@@ -188,10 +249,7 @@ fn eval_expr(expr: &TypeExpr, assignment: &HashMap<TypeVar, TypeExpr>) -> TypeEx
         TypeExpr::Int => TypeExpr::Int,
         TypeExpr::Float => TypeExpr::Float,
         TypeExpr::Named(name) => TypeExpr::Named(name.clone()),
-        TypeExpr::Var(var) => assignment
-            .get(var)
-            .cloned()
-            .unwrap_or(TypeExpr::Int),
+        TypeExpr::Var(var) => assignment.get(var).cloned().unwrap_or(TypeExpr::Int),
         TypeExpr::Lub(left, right) => {
             let lhs = eval_expr(left, assignment);
             let rhs = eval_expr(right, assignment);
@@ -217,11 +275,7 @@ fn primitives_ok<A>(
         let resolved = eval_expr(label, assignment);
         matches!(
             resolved,
-            TypeExpr::Bool
-                | TypeExpr::Unit
-                | TypeExpr::Int
-                | TypeExpr::Float
-                | TypeExpr::Named(_)
+            TypeExpr::Bool | TypeExpr::Unit | TypeExpr::Int | TypeExpr::Float | TypeExpr::Named(_)
         )
     })
 }

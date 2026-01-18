@@ -237,11 +237,14 @@ impl<S, G: GeneratorShape> Circuit<S, G> {
             return acc;
         }
 
-        let mut grouped_types = Vec::with_capacity(terms.len() * 2);
+        let mut interleaved_types = Vec::with_capacity(terms.len() * 2);
         for term in &terms {
-            grouped_types.push(term.clone());
-            grouped_types.push(term.clone());
+            interleaved_types.push(term.clone());
         }
+        for term in &terms {
+            interleaved_types.push(term.clone());
+        }
+
         let mut permutation = Vec::with_capacity(terms.len() * 2);
         for i in 0..terms.len() {
             permutation.push(2 * i);
@@ -249,8 +252,12 @@ impl<S, G: GeneratorShape> Circuit<S, G> {
         for i in 0..terms.len() {
             permutation.push(2 * i + 1);
         }
+        let mut inverse = vec![0usize; permutation.len()];
+        for (idx, val) in permutation.iter().copied().enumerate() {
+            inverse[val] = idx;
+        }
 
-        let permute = permute_circuit(&grouped_types, &permutation);
+        let permute = permute_circuit(&interleaved_types, &inverse);
         Circuit::Seq(Box::new(permute), Box::new(acc))
     }
 
