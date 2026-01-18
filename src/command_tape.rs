@@ -117,8 +117,11 @@ fn if_tape(tree: &CommandDerivationTree) -> Tape<TypeExpr, ExprGenerator> {
         .collect::<Vec<_>>();
     let copy = Tape::EmbedCircuit(Box::new(Circuit::copy_n(context_types.clone())));
     let join = Tape::EmbedCircuit(Box::new(Circuit::join_n(context_types)));
-    let branches = Tape::Product(Box::new(left), Box::new(right));
-    Tape::Seq(Box::new(copy), Box::new(Tape::Seq(Box::new(branches), Box::new(join))))
+    let branches = Tape::Sum(Box::new(left), Box::new(right));
+    Tape::Seq(
+        Box::new(copy),
+        Box::new(Tape::Seq(Box::new(branches), Box::new(join))),
+    )
 }
 
 fn gate_tape(
