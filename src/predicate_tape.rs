@@ -89,16 +89,11 @@ fn tape_from_relation(
     negated: bool,
 ) -> Tape<TypeExpr, ExprGenerator> {
     let context_entries = context_entries_from_args(&args);
-    let context = context_monomial_from_entries(&context_entries);
     let circuit = circuit_from_relation(name, &args, &context_entries, negated);
     let embed = Tape::EmbedCircuit(Box::new(circuit));
     let discard = Tape::Discard(Monomial::atom(TypeExpr::Unit));
     let embed = Tape::Seq(Box::new(embed), Box::new(discard));
-    if args.len() > 1 {
-        Tape::Seq(Box::new(Tape::Split(context)), Box::new(embed))
-    } else {
-        embed
-    }
+    embed
 }
 
 fn circuit_from_relation(

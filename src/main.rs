@@ -29,7 +29,7 @@ use rustpython_parser::{ast, Parse};
 fn main() -> Result<(), Box<dyn Error>> {
     let input = std::env::args().skip(1).collect::<Vec<_>>().join(" ");
     let source = if input.is_empty() {
-        "\nif True:\n  x = 1\nelse:\n  x = 2"
+        "\nif x>0:\n  x = 1\nelse:\n  x = 2"
     } else {
         &input
     };

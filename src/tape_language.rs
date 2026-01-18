@@ -676,9 +676,11 @@ fn compose_lax_unchecked<S: Clone + PartialEq, G: Clone>(
     // Lax composition: we only check interface lengths here; sort checking is deferred.
     if lhs.targets.len() != rhs.sources.len() {
         panic!(
-            "unchecked composition requires same arity, got {} vs {}",
+            "unchecked composition requires same arity, got {} vs {} (lhs: {}, rhs: {})",
             lhs.targets.len(),
-            rhs.sources.len()
+            rhs.sources.len(),
+            describe_open_hypergraph(lhs),
+            describe_open_hypergraph(rhs)
         );
     }
     let n = lhs.hypergraph.nodes.len();
@@ -691,4 +693,30 @@ fn compose_lax_unchecked<S: Clone + PartialEq, G: Clone>(
     composed.sources = composed.sources[..lhs.sources.len()].to_vec();
     composed.targets = composed.targets[lhs.targets.len()..].to_vec();
     composed
+}
+
+fn describe_open_hypergraph<O, A>(graph: &OpenHypergraph<O, A>) -> String {
+    let sources = format_node_list(&graph.sources);
+    let targets = format_node_list(&graph.targets);
+    let mut edges = Vec::with_capacity(graph.hypergraph.adjacency.len());
+    for (idx, edge) in graph.hypergraph.adjacency.iter().enumerate() {
+        let edge_sources = format_node_list(&edge.sources);
+        let edge_targets = format_node_list(&edge.targets);
+        edges.push(format!("e{}: {} -> {}", idx, edge_sources, edge_targets));
+    }
+    format!(
+        "nodes={} sources={} targets={} edges=[{}]",
+        graph.hypergraph.nodes.len(),
+        sources,
+        targets,
+        edges.join(", ")
+    )
+}
+
+fn format_node_list(nodes: &[open_hypergraphs::lax::NodeId]) -> String {
+    let mut parts = Vec::with_capacity(nodes.len());
+    for node in nodes {
+        parts.push(format!("n{}", node.0));
+    }
+    format!("[{}]", parts.join(", "))
 }
