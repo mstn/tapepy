@@ -1,6 +1,6 @@
 use crate::command_typing::{CommandChild, CommandDerivationTree, CommandForm};
 use crate::expression_circuit::{self, ExprGenerator};
-use crate::predicate_tape::tape_from_predicate;
+use crate::predicate_tape::{tape_from_predicate, tape_from_predicate_with_negation};
 use crate::tape_language::{Circuit, Monomial, Tape};
 use crate::types::TypeExpr;
 
@@ -93,24 +93,42 @@ fn if_tape(tree: &CommandDerivationTree) -> Tape<TypeExpr, ExprGenerator> {
     let then_branch = then_branch.expect("if expects then branch");
     let else_branch = else_branch.expect("if expects else branch");
 
-    let context = context_monomial(tree);
-    let pred_tape = tape_from_predicate(pred);
+    let context_entries = tree.judgment().context().entries();
+    let context = monomial_from_entries(context_entries);
     let then_tape = tape_from_command(then_branch);
     let else_tape = tape_from_command(else_branch);
+    let pred_tape = tape_from_predicate(pred);
+    let neg_pred_tape = tape_from_predicate_with_negation(pred, true);
 
-    let not_gate = Tape::EmbedCircuit(Box::new(Circuit::Generator(ExprGenerator::typed(
-        "not",
-        vec![TypeExpr::Bool],
-        vec![TypeExpr::Bool],
-    ))));
-    let not_pred = Tape::Seq(Box::new(pred_tape.clone()), Box::new(not_gate));
+    let left_control = gate_tape(&context, pred_tape);
+    let right_control = gate_tape(&context, neg_pred_tape);
 
-    let left_guarded = Tape::Seq(Box::new(pred_tape), Box::new(Tape::Create(context.clone())));
-    let right_guarded = Tape::Seq(Box::new(not_pred), Box::new(Tape::Create(context)));
-
-    let left = Tape::Seq(Box::new(left_guarded), Box::new(then_tape));
-    let right = Tape::Seq(Box::new(right_guarded), Box::new(else_tape));
+    let left = Tape::Seq(Box::new(left_control), Box::new(then_tape));
+    let right = Tape::Seq(Box::new(right_control), Box::new(else_tape));
     Tape::Sum(Box::new(left), Box::new(right))
+}
+
+fn gate_tape(
+    context: &Monomial<TypeExpr>,
+    pred_tape: Tape<TypeExpr, ExprGenerator>,
+) -> Tape<TypeExpr, ExprGenerator> {
+    let context_types = monomial_atoms(&context)
+        .into_iter()
+        .map(|mono| match mono {
+            Monomial::Atom(ty) => ty,
+            Monomial::One | Monomial::Product(_, _) => {
+                panic!("context monomial atoms must be flat")
+            }
+        })
+        .collect::<Vec<_>>();
+    let copy = Tape::EmbedCircuit(Box::new(Circuit::copy_n(context_types)));
+    Tape::Seq(
+        Box::new(copy),
+        Box::new(Tape::Product(
+            Box::new(pred_tape),
+            Box::new(Tape::Id(context.clone())),
+        )),
+    )
 }
 
 fn command_children(
@@ -128,6 +146,18 @@ fn command_children(
 fn context_monomial(tree: &CommandDerivationTree) -> Monomial<TypeExpr> {
     let entries = tree.judgment().context().entries();
     monomial_from_entries(entries)
+}
+
+fn monomial_atoms<S: Clone>(monomial: &Monomial<S>) -> Vec<Monomial<S>> {
+    match monomial {
+        Monomial::One => Vec::new(),
+        Monomial::Atom(sort) => vec![Monomial::atom(sort.clone())],
+        Monomial::Product(left, right) => {
+            let mut atoms = monomial_atoms(left);
+            atoms.extend(monomial_atoms(right));
+            atoms
+        }
+    }
 }
 
 fn monomial_from_entries(entries: &[(String, TypeExpr)]) -> Monomial<TypeExpr> {

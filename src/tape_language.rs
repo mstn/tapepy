@@ -139,6 +139,7 @@ pub enum Tape<S, G> {
         right: Monomial<S>,
     },
     Seq(Box<Tape<S, G>>, Box<Tape<S, G>>),
+    Product(Box<Tape<S, G>>, Box<Tape<S, G>>),
     Sum(Box<Tape<S, G>>, Box<Tape<S, G>>),
     Discard(Monomial<S>),
     Split(Monomial<S>),
@@ -314,6 +315,14 @@ impl<S, G: GeneratorShape> Tape<S, G> {
                 }
                 TapeArity::new(left_ty.inputs, right_ty.outputs)
             }
+            Tape::Product(left, right) => {
+                let left_ty = left.typing();
+                let right_ty = right.typing();
+                TapeArity::new(
+                    left_ty.inputs + right_ty.inputs,
+                    left_ty.outputs + right_ty.outputs,
+                )
+            }
             Tape::Sum(left, right) => {
                 let left_ty = left.typing();
                 let right_ty = right.typing();
@@ -441,6 +450,11 @@ impl<S: Clone + PartialEq, G: GeneratorShape + GeneratorTypes<S> + Clone> Tape<S
                 let left_graph = left.to_hypergraph(fresh_sort);
                 let right_graph = right.to_hypergraph(fresh_sort);
                 compose_lax_unchecked(&left_graph, &right_graph)
+            }
+            Tape::Product(left, right) => {
+                let left_graph = left.to_hypergraph(fresh_sort);
+                let right_graph = right.to_hypergraph(fresh_sort);
+                left_graph.tensor(&right_graph)
             }
             Tape::Sum(left, right) => {
                 let left_graph = left.to_hypergraph(fresh_sort);

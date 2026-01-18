@@ -1,36 +1,43 @@
-use crate::expression_circuit::circuit_from_expr;
+use crate::expression_circuit::circuit_from_expr_with_context;
 use crate::expression_circuit::ExprGenerator;
 use crate::tape_language::{Circuit, Monomial, Tape};
 use crate::types::TypeExpr;
 use crate::typing::{DeductionTree, ExprForm};
 
 pub fn tape_from_predicate(tree: &DeductionTree) -> Tape<TypeExpr, ExprGenerator> {
+    tape_from_predicate_with_negation(tree, false)
+}
+
+pub fn tape_from_predicate_with_negation(
+    tree: &DeductionTree,
+    negated: bool,
+) -> Tape<TypeExpr, ExprGenerator> {
     match tree.form() {
-        ExprForm::Const(label) => match label.as_str() {
-            "Top" => {
+        ExprForm::Const(label) => match (label.as_str(), negated) {
+            ("Top", false) | ("Bot", true) => {
                 let context = context_monomial(tree);
                 Tape::Discard(context)
             }
-            "Bot" => {
+            ("Bot", false) | ("Top", true) => {
                 let context = context_monomial(tree);
                 let discard = Tape::Discard(context);
                 Tape::Seq(Box::new(discard), Box::new(Tape::Create(Monomial::one())))
             }
             _ => panic!("unsupported predicate constant `{}`", label),
         },
-        ExprForm::BoolOp(op) => match op.as_str() {
-            "and" => {
-                assert_child_count(tree, 2, "and");
-                let left = tape_from_predicate(&tree.children()[0]);
-                let right = tape_from_predicate(&tree.children()[1]);
+        ExprForm::BoolOp(op) => match (op.as_str(), negated) {
+            ("and", false) | ("or", true) => {
+                assert_child_count(tree, 2, op.as_str());
+                let left = tape_from_predicate_with_negation(&tree.children()[0], negated);
+                let right = tape_from_predicate_with_negation(&tree.children()[1], negated);
                 let copy = Tape::Split(context_monomial(tree));
                 let tensor = Tape::Sum(Box::new(left), Box::new(right));
                 Tape::Seq(Box::new(copy), Box::new(tensor))
             }
-            "or" => {
-                assert_child_count(tree, 2, "or");
-                let left = tape_from_predicate(&tree.children()[0]);
-                let right = tape_from_predicate(&tree.children()[1]);
+            ("or", false) | ("and", true) => {
+                assert_child_count(tree, 2, op.as_str());
+                let left = tape_from_predicate_with_negation(&tree.children()[0], negated);
+                let right = tape_from_predicate_with_negation(&tree.children()[1], negated);
                 let copy = Tape::Split(context_monomial(tree));
                 let tensor = Tape::Sum(Box::new(left), Box::new(right));
                 let merged = Tape::Seq(Box::new(copy), Box::new(tensor));
@@ -39,12 +46,15 @@ pub fn tape_from_predicate(tree: &DeductionTree) -> Tape<TypeExpr, ExprGenerator
             _ => panic!("unsupported predicate boolop `{}`", op),
         },
         ExprForm::UnaryOp(op) if op == "not" => {
-            let relation = predicate_relation(tree);
-            tape_from_relation(relation.name, relation.args, true)
+            let child = tree
+                .children()
+                .get(0)
+                .unwrap_or_else(|| panic!("not expects a child"));
+            tape_from_predicate_with_negation(child, !negated)
         }
         ExprForm::Call(_) | ExprForm::Compare(_) => {
             let relation = predicate_relation(tree);
-            tape_from_relation(relation.name, relation.args, false)
+            tape_from_relation(relation.name, relation.args, negated)
         }
         _ => panic!("unsupported predicate form {:?}", tree.form()),
     }
@@ -78,9 +88,12 @@ fn tape_from_relation(
     args: Vec<&DeductionTree>,
     negated: bool,
 ) -> Tape<TypeExpr, ExprGenerator> {
-    let context = context_monomial_from_args(&args);
-    let circuit = circuit_from_relation(name, &args, negated);
+    let context_entries = context_entries_from_args(&args);
+    let context = context_monomial_from_entries(&context_entries);
+    let circuit = circuit_from_relation(name, &args, &context_entries, negated);
     let embed = Tape::EmbedCircuit(Box::new(circuit));
+    let discard = Tape::Discard(Monomial::atom(TypeExpr::Unit));
+    let embed = Tape::Seq(Box::new(embed), Box::new(discard));
     if args.len() > 1 {
         Tape::Seq(Box::new(Tape::Split(context)), Box::new(embed))
     } else {
@@ -91,38 +104,47 @@ fn tape_from_relation(
 fn circuit_from_relation(
     name: String,
     args: &[&DeductionTree],
+    context_entries: &[(String, TypeExpr)],
     negated: bool,
 ) -> Circuit<TypeExpr, ExprGenerator> {
-    let inputs = product_many(args.iter().map(|arg| circuit_from_expr(arg)).collect());
+    let context_types: Vec<TypeExpr> = context_entries.iter().map(|(_, ty)| ty.clone()).collect();
+    let inputs = match args.len() {
+        0 => Circuit::IdOne,
+        1 => circuit_from_expr_with_context(args[0], context_entries),
+        2 => {
+            let left = circuit_from_expr_with_context(args[0], context_entries);
+            let right = circuit_from_expr_with_context(args[1], context_entries);
+            let copy = Circuit::copy_n(context_types);
+            let pair = Circuit::Product(Box::new(left), Box::new(right));
+            Circuit::Seq(Box::new(copy), Box::new(pair))
+        }
+        _ => {
+            panic!("predicate relations with more than 2 arguments are not supported");
+        }
+    };
+    let rel_name = if negated {
+        format!("not {}", name)
+    } else {
+        name
+    };
     let op = Circuit::Generator(ExprGenerator::typed(
-        name,
-        args.iter()
-            .map(|arg| arg.judgment().ty().clone())
-            .collect(),
-        vec![TypeExpr::Bool],
+        rel_name,
+        args.iter().map(|arg| arg.judgment().ty().clone()).collect(),
+        vec![TypeExpr::Unit],
     ));
     let base = Circuit::Seq(Box::new(inputs), Box::new(op));
-    if negated {
-        let not = Circuit::Generator(ExprGenerator::typed(
-            "not",
-            vec![TypeExpr::Bool],
-            vec![TypeExpr::Bool],
-        ));
-        Circuit::Seq(Box::new(base), Box::new(not))
-    } else {
-        base
-    }
+    base
 }
 
 fn context_monomial(tree: &DeductionTree) -> Monomial<TypeExpr> {
     context_monomial_from_entries(tree.judgment().context().entries())
 }
 
-fn context_monomial_from_args(args: &[&DeductionTree]) -> Monomial<TypeExpr> {
+fn context_entries_from_args(args: &[&DeductionTree]) -> Vec<(String, TypeExpr)> {
     if let Some(first) = args.first() {
-        context_monomial_from_entries(first.judgment().context().entries())
+        first.judgment().context().entries().to_vec()
     } else {
-        Monomial::one()
+        Vec::new()
     }
 }
 
@@ -130,17 +152,6 @@ fn context_monomial_from_entries(entries: &[(String, TypeExpr)]) -> Monomial<Typ
     entries.iter().fold(Monomial::one(), |acc, (_, ty)| {
         Monomial::product(acc, Monomial::atom(ty.clone()))
     })
-}
-
-fn product_many<S, G>(mut circuits: Vec<Circuit<S, G>>) -> Circuit<S, G> {
-    if circuits.is_empty() {
-        return Circuit::IdOne;
-    }
-    let mut acc = circuits.remove(0);
-    for circuit in circuits {
-        acc = Circuit::Product(Box::new(acc), Box::new(circuit));
-    }
-    acc
 }
 
 fn assert_child_count(tree: &DeductionTree, expected: usize, label: &str) {
