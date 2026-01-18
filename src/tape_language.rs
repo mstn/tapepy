@@ -437,17 +437,11 @@ impl<S: Clone + PartialEq, G: GeneratorShape + GeneratorTypes<S> + Clone> Tape<S
                     .collect();
                 graph
             }
-            Tape::Seq(left, right) => match (left.as_ref(), right.as_ref()) {
-                (Tape::EmbedCircuit(left_c), Tape::EmbedCircuit(right_c)) => {
-                    Tape::EmbedCircuit(Box::new(Circuit::Seq(left_c.clone(), right_c.clone())))
-                        .to_hypergraph(fresh_sort)
-                }
-                _ => {
-                    let left_graph = left.to_hypergraph(fresh_sort);
-                    let right_graph = right.to_hypergraph(fresh_sort);
-                    compose_lax_unchecked(&left_graph, &right_graph)
-                }
-            },
+            Tape::Seq(left, right) => {
+                let left_graph = left.to_hypergraph(fresh_sort);
+                let right_graph = right.to_hypergraph(fresh_sort);
+                compose_lax_unchecked(&left_graph, &right_graph)
+            }
             Tape::Sum(left, right) => {
                 let left_graph = left.to_hypergraph(fresh_sort);
                 let right_graph = right.to_hypergraph(fresh_sort);

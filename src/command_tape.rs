@@ -13,7 +13,12 @@ pub fn tape_from_command(tree: &CommandDerivationTree) -> Tape<TypeExpr, ExprGen
             let (left, right) = command_children(tree);
             let left_tape = tape_from_command(left);
             let right_tape = tape_from_command(right);
-            Tape::Seq(Box::new(left_tape), Box::new(right_tape))
+            match (left_tape.clone(), right_tape.clone()) {
+                (Tape::EmbedCircuit(circuit_left), Tape::EmbedCircuit(circuit_right)) => {
+                    Tape::EmbedCircuit(Box::new(Circuit::Seq(circuit_left, circuit_right)))
+                }
+                _ => Tape::Seq(Box::new(left_tape), Box::new(right_tape)),
+            }
         }
         CommandForm::If => if_tape(tree),
         CommandForm::While => {
