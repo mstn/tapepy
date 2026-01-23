@@ -1,8 +1,6 @@
 use std::fmt;
 
-use crate::tape_language::{
-    product_many, wiring_circuit_for_context, Circuit, GeneratorShape, GeneratorTypes, Monomial,
-};
+use crate::tape_language::{Circuit, GeneratorShape, GeneratorTypes, Monomial};
 use crate::types::TypeExpr;
 use crate::typing::{DeductionTree, ExprForm};
 
@@ -107,7 +105,8 @@ pub fn circuit_from_expr(tree: &DeductionTree) -> Circuit<TypeExpr, ExprGenerato
             Circuit::Seq(Box::new(inputs), Box::new(gen))
         }
         ExprForm::BoolOp(op) => {
-            let inputs = product_many(tree.children().iter().map(circuit_from_expr).collect());
+            let inputs =
+                Circuit::product_many(tree.children().iter().map(circuit_from_expr).collect());
             let gen = Circuit::Generator(ExprGenerator::typed(
                 op,
                 tree.children()
@@ -137,7 +136,8 @@ pub fn circuit_from_expr(tree: &DeductionTree) -> Circuit<TypeExpr, ExprGenerato
             if tree.children().is_empty() {
                 panic!("Call expects at least 1 child");
             }
-            let inputs = product_many(tree.children().iter().map(circuit_from_expr).collect());
+            let inputs =
+                Circuit::product_many(tree.children().iter().map(circuit_from_expr).collect());
             let gen = Circuit::Generator(ExprGenerator::typed(
                 name,
                 tree.children()
@@ -168,5 +168,5 @@ fn wiring_circuit_for_expression(
 ) -> Circuit<TypeExpr, ExprGenerator> {
     // Determine the exact order and multiplicity of variable uses in the expression.
     let input_vars = tree.expr_input_vars();
-    wiring_circuit_for_context(context_entries, &input_vars)
+    Circuit::wiring_circuit_for_context(context_entries, &input_vars)
 }

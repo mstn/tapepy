@@ -47,7 +47,7 @@ impl CircuitArity {
 impl<S, G> Circuit<S, G> {
     pub fn id(terms: Vec<S>) -> Self {
         let circuits: Vec<Self> = terms.into_iter().map(Circuit::Id).collect();
-        product_many(circuits)
+        Circuit::product_many(circuits)
     }
 
     pub fn copy_wires(terms: Vec<S>) -> Self
@@ -81,7 +81,7 @@ impl<S, G> Circuit<S, G> {
             permutation.push(2 * i + 1);
         }
 
-        let permute = permute_circuit(&grouped_types, &Permutation(permutation));
+        let permute = Circuit::permute_circuit(&grouped_types, &Permutation(permutation));
         Circuit::Seq(Box::new(acc), Box::new(permute))
     }
 
@@ -141,8 +141,81 @@ impl<S, G> Circuit<S, G> {
             inverse[val] = idx;
         }
 
-        let permute = permute_circuit(&interleaved_types, &Permutation(inverse));
+        let permute = Circuit::permute_circuit(&interleaved_types, &Permutation(inverse));
         Circuit::Seq(Box::new(permute), Box::new(acc))
+    }
+
+    fn permute_circuit(types: &[S], permutation: &Permutation) -> Self
+    where
+        S: Clone,
+    {
+        if permutation.is_identity() {
+            return Circuit::id(types.to_vec());
+        }
+
+        let mut current: Vec<usize> = (0..types.len()).collect();
+        let mut current_types: Vec<S> = types.to_vec();
+        let mut swaps = Vec::new();
+
+        for target_idx in 0..permutation.0.len() {
+            let desired = permutation.0[target_idx];
+            let mut pos = current
+                .iter()
+                .position(|idx| *idx == desired)
+                .unwrap_or_else(|| panic!("permutation missing index {}", desired));
+            while pos > target_idx {
+                swaps.push(swap_adjacent(&current_types, pos - 1));
+                current.swap(pos - 1, pos);
+                current_types.swap(pos - 1, pos);
+                pos -= 1;
+            }
+        }
+
+        swaps
+            .into_iter()
+            .fold(Circuit::id(types.to_vec()), |acc, swap| {
+                Circuit::Seq(Box::new(acc), Box::new(swap))
+            })
+    }
+
+    pub fn product_many(mut circuits: Vec<Circuit<S, G>>) -> Circuit<S, G> {
+        if circuits.is_empty() {
+            return Circuit::IdOne;
+        }
+        let mut acc = circuits.remove(0);
+        for circuit in circuits {
+            acc = Circuit::Product(Box::new(acc), Box::new(circuit));
+        }
+        acc
+    }
+
+    pub fn wiring_circuit_for_context(
+        context_entries: &[(String, S)],
+        input_vars: &[String],
+    ) -> Circuit<S, G>
+    where
+        S: Clone,
+    {
+        let mut counts = Vec::with_capacity(context_entries.len());
+        for (name, _) in context_entries {
+            let count = input_vars.iter().filter(|var| *var == name).count();
+            counts.push(count);
+        }
+
+        let mut var_circuits = Vec::with_capacity(context_entries.len());
+        for ((_, ty), count) in context_entries.iter().zip(counts.iter().copied()) {
+            var_circuits.push(Circuit::copy_wire_n_times(ty.clone(), count));
+        }
+        let grouped = Circuit::product_many(var_circuits);
+
+        let grouped_types = grouped_types(context_entries, &counts);
+        let permutation = permutation_for_inputs(context_entries, input_vars, &counts);
+        if permutation.is_identity() {
+            grouped
+        } else {
+            let perm = Circuit::permute_circuit(&grouped_types, &permutation);
+            Circuit::Seq(Box::new(grouped), Box::new(perm))
+        }
     }
 }
 
@@ -278,90 +351,12 @@ fn fresh_sorts<S, F: FnMut() -> S>(fresh_sort: &mut F, count: usize) -> Vec<S> {
     (0..count).map(|_| fresh_sort()).collect()
 }
 
-pub fn permute_circuit<S: Clone, G>(types: &[S], permutation: &Permutation) -> Circuit<S, G> {
-    if permutation.is_identity() {
-        return identity_for_types(types);
-    }
-
-    let mut current: Vec<usize> = (0..types.len()).collect();
-    let mut current_types: Vec<S> = types.to_vec();
-    let mut swaps = Vec::new();
-
-    for target_idx in 0..permutation.0.len() {
-        let desired = permutation.0[target_idx];
-        let mut pos = current
-            .iter()
-            .position(|idx| *idx == desired)
-            .unwrap_or_else(|| panic!("permutation missing index {}", desired));
-        while pos > target_idx {
-            swaps.push(swap_adjacent(&current_types, pos - 1));
-            current.swap(pos - 1, pos);
-            current_types.swap(pos - 1, pos);
-            pos -= 1;
-        }
-    }
-
-    swaps
-        .into_iter()
-        .fold(identity_for_types(types), |acc, swap| {
-            Circuit::Seq(Box::new(acc), Box::new(swap))
-        })
-}
-
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Permutation(pub Vec<usize>);
+struct Permutation(Vec<usize>);
 
 impl Permutation {
-    pub fn is_identity(&self) -> bool {
+    fn is_identity(&self) -> bool {
         self.0.iter().enumerate().all(|(idx, val)| idx == *val)
-    }
-}
-
-pub fn identity_for_types<S: Clone, G>(types: &[S]) -> Circuit<S, G> {
-    if types.is_empty() {
-        return Circuit::IdOne;
-    }
-    let mut circuits = Vec::with_capacity(types.len());
-    for ty in types {
-        circuits.push(Circuit::Id(ty.clone()));
-    }
-    product_many(circuits)
-}
-
-pub fn product_many<S, G>(mut circuits: Vec<Circuit<S, G>>) -> Circuit<S, G> {
-    if circuits.is_empty() {
-        return Circuit::IdOne;
-    }
-    let mut acc = circuits.remove(0);
-    for circuit in circuits {
-        acc = Circuit::Product(Box::new(acc), Box::new(circuit));
-    }
-    acc
-}
-
-pub fn wiring_circuit_for_context<S: Clone, G>(
-    context_entries: &[(String, S)],
-    input_vars: &[String],
-) -> Circuit<S, G> {
-    let mut counts = Vec::with_capacity(context_entries.len());
-    for (name, _) in context_entries {
-        let count = input_vars.iter().filter(|var| *var == name).count();
-        counts.push(count);
-    }
-
-    let mut var_circuits = Vec::with_capacity(context_entries.len());
-    for ((_, ty), count) in context_entries.iter().zip(counts.iter().copied()) {
-        var_circuits.push(Circuit::copy_wire_n_times(ty.clone(), count));
-    }
-    let grouped = product_many(var_circuits);
-
-    let grouped_types = grouped_types(context_entries, &counts);
-    let permutation = permutation_for_inputs(context_entries, input_vars, &counts);
-    if permutation.is_identity() {
-        grouped
-    } else {
-        let perm = permute_circuit(&grouped_types, &permutation);
-        Circuit::Seq(Box::new(grouped), Box::new(perm))
     }
 }
 
@@ -403,12 +398,12 @@ fn permutation_for_inputs<S>(
 }
 
 fn swap_adjacent<S: Clone, G>(types: &[S], index: usize) -> Circuit<S, G> {
-    let left = identity_for_types(&types[..index]);
+    let left = Circuit::id(types[..index].to_vec());
     let mid = Circuit::Swap {
         left: types[index].clone(),
         right: types[index + 1].clone(),
     };
-    let right = identity_for_types(&types[index + 2..]);
+    let right = Circuit::id(types[index + 2..].to_vec());
 
     match (left, right) {
         (Circuit::IdOne, Circuit::IdOne) => mid,

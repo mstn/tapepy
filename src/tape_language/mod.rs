@@ -4,10 +4,7 @@ use std::fmt;
 pub mod circuit;
 pub mod tape;
 
-pub use circuit::{
-    identity_for_types, permute_circuit, product_many, wiring_circuit_for_context, Circuit,
-    CircuitArity, Permutation,
-};
+pub use circuit::{Circuit, CircuitArity};
 pub use tape::{Tape, TapeArity, TapeEdge};
 
 pub trait GeneratorShape {
