@@ -11,7 +11,12 @@ pub fn tape_from_command(tree: &CommandDerivationTree) -> Tape<TypeExpr, ExprGen
         CommandForm::Skip => Tape::Id(context_monomial(tree)),
         CommandForm::Assign(name) => assignment_tape(tree, name),
         CommandForm::Seq => {
-            let (left, right) = command_children(tree);
+            let mut iter = tree.children().iter().filter_map(|child| match child {
+                CommandChild::Command(cmd) => Some(cmd),
+                _ => None,
+            });
+            let left = iter.next().expect("sequence expects left command");
+            let right = iter.next().expect("sequence expects right command");
             let left_tape = tape_from_command(left);
             let right_tape = tape_from_command(right);
             match (left_tape.clone(), right_tape.clone()) {
@@ -141,18 +146,6 @@ fn gate_tape(
         Box::new(copy),
         Box::new(Tape::Product(Box::new(pred_tape), Box::new(exec_tape))),
     )
-}
-
-fn command_children(
-    tree: &CommandDerivationTree,
-) -> (&CommandDerivationTree, &CommandDerivationTree) {
-    let mut iter = tree.children().iter().filter_map(|child| match child {
-        CommandChild::Command(cmd) => Some(cmd),
-        _ => None,
-    });
-    let left = iter.next().expect("sequence expects left command");
-    let right = iter.next().expect("sequence expects right command");
-    (left, right)
 }
 
 fn context_monomial(tree: &CommandDerivationTree) -> Monomial<TypeExpr> {
