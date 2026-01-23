@@ -14,11 +14,11 @@ pub fn tape_from_predicate_with_negation(
 ) -> Tape<TypeExpr, ExprGenerator> {
     match tree.form() {
         ExprForm::Const(label) => match (label.as_str(), negated) {
-            ("Top", false) | ("Bot", true) => {
+            ("True", false) | ("False", true) => {
                 let context = context_monomial(tree);
                 Tape::Discard(context)
             }
-            ("Bot", false) | ("Top", true) => {
+            ("False", false) | ("True", true) => {
                 let context = context_monomial(tree);
                 let discard = Tape::Discard(context);
                 Tape::Seq(Box::new(discard), Box::new(Tape::Create(Monomial::one())))

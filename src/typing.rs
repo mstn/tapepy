@@ -780,9 +780,9 @@ fn const_label(c: &rustpython_parser::ast::ExprConstant) -> String {
 
 fn predicate_const_label(value: bool) -> String {
     if value {
-        "Top".to_string()
+        "True".to_string()
     } else {
-        "Bot".to_string()
+        "False".to_string()
     }
 }
 
