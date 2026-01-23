@@ -84,6 +84,41 @@ impl DeductionTree {
         &self.form
     }
 
+    pub fn assert_child_count(&self, expected: usize, label: &str) {
+        let actual = self.children.len();
+        if actual != expected {
+            panic!("{} expects {} children, got {}", label, expected, actual);
+        }
+    }
+
+    pub fn expr_input_vars(&self) -> Vec<String> {
+        match self.form() {
+            ExprForm::Var(name) => vec![name.clone()],
+            ExprForm::Const(_) => Vec::new(),
+            ExprForm::UnaryOp(_) => self
+                .children()
+                .get(0)
+                .map(|child| child.expr_input_vars())
+                .unwrap_or_default(),
+            ExprForm::Call(_) | ExprForm::BoolOp(_) => {
+                let mut vars = Vec::new();
+                for child in self.children() {
+                    vars.extend(child.expr_input_vars());
+                }
+                vars
+            }
+            ExprForm::BinOp(_) | ExprForm::Compare(_) => {
+                if self.children().len() != 2 {
+                    return Vec::new();
+                }
+                let mut left = self.children()[0].expr_input_vars();
+                let mut right = self.children()[1].expr_input_vars();
+                left.append(&mut right);
+                left
+            }
+        }
+    }
+
     fn fmt_with_indent(&self, f: &mut fmt::Formatter<'_>, indent: usize) -> fmt::Result {
         for _ in 0..indent {
             write!(f, "  ")?;

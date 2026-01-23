@@ -80,7 +80,7 @@ pub fn circuit_from_expr(tree: &DeductionTree) -> Circuit<TypeExpr, ExprGenerato
             vec![tree.judgment().ty().clone()],
         )),
         ExprForm::UnaryOp(op) => {
-            assert_child_count(tree, 1, "UnaryOp");
+            tree.assert_child_count(1, "UnaryOp");
             let child = circuit_from_expr(&tree.children()[0]);
             let gen = Circuit::Generator(ExprGenerator::typed(
                 op,
@@ -90,7 +90,7 @@ pub fn circuit_from_expr(tree: &DeductionTree) -> Circuit<TypeExpr, ExprGenerato
             Circuit::Seq(Box::new(child), Box::new(gen))
         }
         ExprForm::BinOp(op) => {
-            assert_child_count(tree, 2, "BinOp");
+            tree.assert_child_count(2, "BinOp");
             let left = circuit_from_expr(&tree.children()[0]);
             let right = circuit_from_expr(&tree.children()[1]);
             let inputs = Circuit::Product(Box::new(left), Box::new(right));
@@ -117,7 +117,7 @@ pub fn circuit_from_expr(tree: &DeductionTree) -> Circuit<TypeExpr, ExprGenerato
             Circuit::Seq(Box::new(inputs), Box::new(gen))
         }
         ExprForm::Compare(op) => {
-            assert_child_count(tree, 2, "Compare");
+            tree.assert_child_count(2, "Compare");
             let left = circuit_from_expr(&tree.children()[0]);
             let right = circuit_from_expr(&tree.children()[1]);
             let inputs = Circuit::Product(Box::new(left), Box::new(right));
@@ -160,47 +160,12 @@ pub fn circuit_from_expr_with_context(
     Circuit::Seq(Box::new(wiring), Box::new(expr))
 }
 
-fn assert_child_count(tree: &DeductionTree, expected: usize, label: &str) {
-    let actual = tree.children().len();
-    if actual != expected {
-        panic!("{} expects {} children, got {}", label, expected, actual);
-    }
-}
-
-fn expr_input_vars(tree: &DeductionTree) -> Vec<String> {
-    match tree.form() {
-        ExprForm::Var(name) => vec![name.clone()],
-        ExprForm::Const(_) => Vec::new(),
-        ExprForm::UnaryOp(_) => tree
-            .children()
-            .get(0)
-            .map(expr_input_vars)
-            .unwrap_or_default(),
-        ExprForm::Call(_) | ExprForm::BoolOp(_) => {
-            let mut vars = Vec::new();
-            for child in tree.children() {
-                vars.extend(expr_input_vars(child));
-            }
-            vars
-        }
-        ExprForm::BinOp(_) | ExprForm::Compare(_) => {
-            if tree.children().len() != 2 {
-                return Vec::new();
-            }
-            let mut left = expr_input_vars(&tree.children()[0]);
-            let mut right = expr_input_vars(&tree.children()[1]);
-            left.append(&mut right);
-            left
-        }
-    }
-}
-
 fn wiring_circuit_for_expression(
     tree: &DeductionTree,
     context_entries: &[(String, TypeExpr)],
 ) -> Circuit<TypeExpr, ExprGenerator> {
     // Determine the exact order and multiplicity of variable uses in the expression.
-    let input_vars = expr_input_vars(tree);
+    let input_vars = tree.expr_input_vars();
     let mut counts = Vec::with_capacity(context_entries.len());
     for (name, _) in context_entries {
         let count = input_vars.iter().filter(|var| *var == name).count();
