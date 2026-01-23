@@ -26,10 +26,17 @@ fn const_expression_is_generator_with_zero_inputs() {
     let circuit = circuit_from_expr(&tree);
 
     match circuit {
-        Circuit::Generator(gen) => {
-            assert_eq!(gen.input_types.as_ref().unwrap().len(), 0);
-            assert_eq!(gen.output_types.as_ref().unwrap().len(), 1);
-        }
+        Circuit::Generator(gen) => match gen {
+            tapepy::expression_circuit::ExprGenerator::Function {
+                input_types,
+                output_types,
+                ..
+            } => {
+                assert_eq!(input_types.len(), 0);
+                assert_eq!(output_types.len(), 1);
+            }
+            _ => panic!("expected function generator for constant expression"),
+        },
         _ => panic!("expected generator circuit for constant expression"),
     }
 }
@@ -44,10 +51,17 @@ fn binop_expression_builds_seq_with_binary_generator() {
         Circuit::Seq(inputs, gen) => {
             assert!(matches!(*inputs, Circuit::Product(_, _)));
             match *gen {
-                Circuit::Generator(gen) => {
-                    assert_eq!(gen.input_types.as_ref().unwrap().len(), 2);
-                    assert_eq!(gen.output_types.as_ref().unwrap().len(), 1);
-                }
+                Circuit::Generator(gen) => match gen {
+                    tapepy::expression_circuit::ExprGenerator::Function {
+                        input_types,
+                        output_types,
+                        ..
+                    } => {
+                        assert_eq!(input_types.len(), 2);
+                        assert_eq!(output_types.len(), 1);
+                    }
+                    _ => panic!("expected function generator at end of binary op circuit"),
+                },
                 _ => panic!("expected generator at end of binary op circuit"),
             }
         }

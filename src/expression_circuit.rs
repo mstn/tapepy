@@ -5,76 +5,128 @@ use crate::types::TypeExpr;
 use crate::typing::{DeductionTree, ExprForm};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ExprGenerator {
-    pub name: String,
-    pub input_types: Option<Vec<TypeExpr>>,
-    pub output_types: Option<Vec<TypeExpr>>,
+pub enum ExprGenerator {
+    Function {
+        name: String,
+        input_types: Vec<TypeExpr>,
+        output_types: Vec<TypeExpr>,
+    },
+    Predicate {
+        name: String,
+        input_types: Vec<TypeExpr>,
+        negated: bool,
+    },
 }
 
 impl ExprGenerator {
-    pub fn typed(
+    pub fn function(
         name: impl Into<String>,
         input_types: Vec<TypeExpr>,
         output_types: Vec<TypeExpr>,
     ) -> Self {
-        Self {
+        Self::Function {
             name: name.into(),
-            input_types: Some(input_types),
-            output_types: Some(output_types),
+            input_types,
+            output_types,
+        }
+    }
+
+    pub fn predicate(name: impl Into<String>, input_types: Vec<TypeExpr>, negated: bool) -> Self {
+        Self::Predicate {
+            name: name.into(),
+            input_types,
+            negated,
         }
     }
 }
 
 impl fmt::Display for ExprGenerator {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", self.name)
+        match self {
+            ExprGenerator::Function { name, .. } => write!(f, "{}", name),
+            ExprGenerator::Predicate {
+                name, negated, ..
+            } => {
+                if *negated {
+                    write!(f, "not {}", name)
+                } else {
+                    write!(f, "{}", name)
+                }
+            }
+        }
     }
 }
 
 impl GeneratorShape for ExprGenerator {
     fn arity(&self) -> usize {
-        self.input_types
-            .as_ref()
-            .map(|inputs| inputs.len())
-            .expect("ExprGenerator missing input types")
+        match self {
+            ExprGenerator::Function { input_types, .. } => input_types.len(),
+            ExprGenerator::Predicate { input_types, .. } => input_types.len(),
+        }
     }
 
     fn coarity(&self) -> usize {
-        self.output_types
-            .as_ref()
-            .map(|outputs| outputs.len())
-            .expect("ExprGenerator missing output types")
+        match self {
+            ExprGenerator::Function { output_types, .. } => output_types.len(),
+            ExprGenerator::Predicate { .. } => 1,
+        }
     }
 }
 
 impl GeneratorTypes<TypeExpr> for ExprGenerator {
     fn input_types(&self) -> Option<Vec<TypeExpr>> {
-        self.input_types.clone()
+        match self {
+            ExprGenerator::Function { input_types, .. } => Some(input_types.clone()),
+            ExprGenerator::Predicate { input_types, .. } => Some(input_types.clone()),
+        }
     }
 
     fn output_types(&self) -> Option<Vec<TypeExpr>> {
-        self.output_types.clone()
+        match self {
+            ExprGenerator::Function { output_types, .. } => Some(output_types.clone()),
+            ExprGenerator::Predicate { .. } => Some(vec![TypeExpr::Bool]),
+        }
     }
 }
 
 impl GeneratorTypes<Monomial<TypeExpr>> for ExprGenerator {
     fn input_types(&self) -> Option<Vec<Monomial<TypeExpr>>> {
-        self.input_types
-            .as_ref()
-            .map(|inputs| inputs.iter().cloned().map(Monomial::atom).collect())
+        match self {
+            ExprGenerator::Function { input_types, .. } => Some(
+                input_types
+                    .iter()
+                    .cloned()
+                    .map(Monomial::atom)
+                    .collect(),
+            ),
+            ExprGenerator::Predicate { input_types, .. } => Some(
+                input_types
+                    .iter()
+                    .cloned()
+                    .map(Monomial::atom)
+                    .collect(),
+            ),
+        }
     }
 
     fn output_types(&self) -> Option<Vec<Monomial<TypeExpr>>> {
-        self.output_types
-            .as_ref()
-            .map(|outputs| outputs.iter().cloned().map(Monomial::atom).collect())
+        match self {
+            ExprGenerator::Function { output_types, .. } => Some(
+                output_types
+                    .iter()
+                    .cloned()
+                    .map(Monomial::atom)
+                    .collect(),
+            ),
+            ExprGenerator::Predicate { .. } => Some(vec![Monomial::atom(TypeExpr::Bool)]),
+        }
     }
 }
 
 pub fn circuit_from_expr(tree: &DeductionTree) -> Circuit<TypeExpr, ExprGenerator> {
     match tree.form() {
         ExprForm::Var(_) => Circuit::Id(tree.judgment().ty().clone()),
-        ExprForm::Const(label) => Circuit::Generator(ExprGenerator::typed(
+        ExprForm::Const(label) => Circuit::Generator(ExprGenerator::function(
             label,
             Vec::new(),
             vec![tree.judgment().ty().clone()],
@@ -82,7 +134,7 @@ pub fn circuit_from_expr(tree: &DeductionTree) -> Circuit<TypeExpr, ExprGenerato
         ExprForm::UnaryOp(op) => {
             tree.assert_child_count(1, "UnaryOp");
             let child = circuit_from_expr(&tree.children()[0]);
-            let gen = Circuit::Generator(ExprGenerator::typed(
+            let gen = Circuit::Generator(ExprGenerator::function(
                 op,
                 vec![tree.children()[0].judgment().ty().clone()],
                 vec![tree.judgment().ty().clone()],
@@ -94,7 +146,7 @@ pub fn circuit_from_expr(tree: &DeductionTree) -> Circuit<TypeExpr, ExprGenerato
             let left = circuit_from_expr(&tree.children()[0]);
             let right = circuit_from_expr(&tree.children()[1]);
             let inputs = Circuit::Product(Box::new(left), Box::new(right));
-            let gen = Circuit::Generator(ExprGenerator::typed(
+            let gen = Circuit::Generator(ExprGenerator::function(
                 op,
                 vec![
                     tree.children()[0].judgment().ty().clone(),
@@ -107,7 +159,7 @@ pub fn circuit_from_expr(tree: &DeductionTree) -> Circuit<TypeExpr, ExprGenerato
         ExprForm::BoolOp(op) => {
             let inputs =
                 Circuit::product_many(tree.children().iter().map(circuit_from_expr).collect());
-            let gen = Circuit::Generator(ExprGenerator::typed(
+            let gen = Circuit::Generator(ExprGenerator::function(
                 op,
                 tree.children()
                     .iter()
@@ -122,7 +174,7 @@ pub fn circuit_from_expr(tree: &DeductionTree) -> Circuit<TypeExpr, ExprGenerato
             let left = circuit_from_expr(&tree.children()[0]);
             let right = circuit_from_expr(&tree.children()[1]);
             let inputs = Circuit::Product(Box::new(left), Box::new(right));
-            let gen = Circuit::Generator(ExprGenerator::typed(
+            let gen = Circuit::Generator(ExprGenerator::function(
                 op,
                 vec![
                     tree.children()[0].judgment().ty().clone(),
@@ -138,7 +190,7 @@ pub fn circuit_from_expr(tree: &DeductionTree) -> Circuit<TypeExpr, ExprGenerato
             }
             let inputs =
                 Circuit::product_many(tree.children().iter().map(circuit_from_expr).collect());
-            let gen = Circuit::Generator(ExprGenerator::typed(
+            let gen = Circuit::Generator(ExprGenerator::function(
                 name,
                 tree.children()
                     .iter()

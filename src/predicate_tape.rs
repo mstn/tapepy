@@ -93,7 +93,7 @@ fn tape_from_relation(
     };
     let circuit = circuit_from_relation(name, &args, &context_entries, negated);
     let embed = Tape::EmbedCircuit(Box::new(circuit));
-    let discard = Tape::Discard(Monomial::atom(TypeExpr::Unit));
+    let discard = Tape::Discard(Monomial::atom(TypeExpr::Bool));
     Tape::Seq(Box::new(embed), Box::new(discard))
 }
 
@@ -104,7 +104,7 @@ fn circuit_from_relation(
     negated: bool,
 ) -> Circuit<TypeExpr, ExprGenerator> {
     // Build the relation circuit by wiring argument expressions from the shared context, then
-    // sequencing into a relation generator (named by the predicate) that outputs Unit.
+    // sequencing into a relation generator (named by the predicate) that outputs Bool.
     let inputs = match args.len() {
         0 => Circuit::IdOne,
         _ => {
@@ -130,16 +130,10 @@ fn circuit_from_relation(
             }
         }
     };
-    let rel_name = if negated {
-        // Encode negation by renaming the relation; no boolean algebra is applied here.
-        format!("not {}", name)
-    } else {
-        name
-    };
-    let op = Circuit::Generator(ExprGenerator::typed(
-        rel_name,
+    let op = Circuit::Generator(ExprGenerator::predicate(
+        name,
         args.iter().map(|arg| arg.judgment().ty().clone()).collect(),
-        vec![TypeExpr::Unit],
+        negated,
     ));
     let base = Circuit::Seq(Box::new(inputs), Box::new(op));
     base
