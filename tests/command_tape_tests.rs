@@ -4,7 +4,7 @@ use tapepy::command_tape::tape_from_command;
 use tapepy::command_typing::infer_command_from_suite;
 use tapepy::expression_circuit::ExprGenerator;
 use tapepy::tape_language::circuit::Circuit;
-use tapepy::tape_language::monomial_from_entries;
+use tapepy::tape_language::monomial_from_entries_typeexpr;
 use tapepy::tape_language::tape::monomial_atoms;
 use tapepy::tape_language::tape::Tape;
 use tapepy::tape_language::Monomial;
@@ -30,7 +30,7 @@ fn infer_tape(
 fn skip_is_id_tape() {
     let (tree, tape) = infer_tape("pass");
     let context_entries = tree.judgment().context().entries();
-    let expected = monomial_from_entries(context_entries);
+    let expected = monomial_from_entries_typeexpr(context_entries);
 
     match tape {
         Tape::Id(mono) => assert_eq!(mono, expected),
@@ -42,7 +42,7 @@ fn skip_is_id_tape() {
 fn abort_is_discard_tape() {
     let (tree, tape) = infer_tape("raise");
     let context_entries = tree.judgment().context().entries();
-    let expected = monomial_from_entries(context_entries);
+    let expected = monomial_from_entries_typeexpr(context_entries);
 
     match tape {
         Tape::Discard(mono) => assert_eq!(mono, expected),
@@ -461,31 +461,22 @@ fn assert_predicate_compare_tape(
     negated: bool,
 ) {
     match tape {
-        Tape::Seq(embed, discard) => {
-            assert!(matches!(
-                **discard,
-                Tape::Discard(Monomial::Atom(TypeExpr::Bool))
-            ));
-            match &**embed {
-                Tape::EmbedCircuit(circuit) => match &**circuit {
-                    Circuit::Seq(_, op) => match &**op {
-                        Circuit::Generator(ExprGenerator::Predicate {
-                            name,
-                            input_types,
-                            negated: gen_neg,
-                        }) => {
-                            assert_eq!(name, ">");
-                            assert_eq!(*gen_neg, negated);
-                            assert_eq!(*input_types, expected_inputs);
-                        }
-                        _ => panic!("expected predicate generator"),
-                    },
-                    _ => panic!("expected seq in predicate circuit"),
-                },
-                _ => panic!("expected embedded circuit in predicate tape"),
-            }
-        }
-        _ => panic!("expected seq in predicate tape"),
+        Tape::EmbedCircuit(circuit) => match &**circuit {
+            Circuit::Seq(_, op) => match &**op {
+                Circuit::Generator(ExprGenerator::Predicate {
+                    name,
+                    input_types,
+                    negated: gen_neg,
+                }) => {
+                    assert_eq!(name, ">");
+                    assert_eq!(*gen_neg, negated);
+                    assert_eq!(*input_types, expected_inputs);
+                }
+                _ => panic!("expected predicate generator"),
+            },
+            _ => panic!("expected seq in predicate circuit"),
+        },
+        _ => panic!("expected embedded circuit in predicate tape"),
     }
 }
 
@@ -789,10 +780,7 @@ fn compare_pred_tape(
         negated,
     ));
     let circuit = Circuit::seq(inputs, gen);
-    Tape::Seq(
-        Box::new(Tape::EmbedCircuit(Box::new(circuit))),
-        Box::new(Tape::Discard(Monomial::Atom(TypeExpr::Bool))),
-    )
+    Tape::EmbedCircuit(Box::new(circuit))
 }
 
 fn gate_tape_for_test(

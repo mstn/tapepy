@@ -68,7 +68,7 @@ impl GeneratorShape for ExprGenerator {
     fn coarity(&self) -> usize {
         match self {
             ExprGenerator::Function { output_types, .. } => output_types.len(),
-            ExprGenerator::Predicate { .. } => 1,
+            ExprGenerator::Predicate { .. } => 0,
         }
     }
 }
@@ -84,7 +84,7 @@ impl GeneratorTypes<TypeExpr> for ExprGenerator {
     fn output_types(&self) -> Option<Vec<TypeExpr>> {
         match self {
             ExprGenerator::Function { output_types, .. } => Some(output_types.clone()),
-            ExprGenerator::Predicate { .. } => Some(vec![TypeExpr::Bool]),
+            ExprGenerator::Predicate { .. } => Some(Vec::new()),
         }
     }
 }
@@ -118,7 +118,7 @@ impl GeneratorTypes<Monomial<TypeExpr>> for ExprGenerator {
                     .map(Monomial::atom)
                     .collect(),
             ),
-            ExprGenerator::Predicate { .. } => Some(vec![Monomial::atom(TypeExpr::Bool)]),
+            ExprGenerator::Predicate { .. } => Some(Vec::new()),
         }
     }
 }

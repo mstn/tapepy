@@ -3,8 +3,7 @@ use rustpython_parser::{ast, Parse};
 use tapepy::expression_circuit::ExprGenerator;
 use tapepy::predicate_tape::tape_from_predicate;
 use tapepy::tape_language::tape::Tape;
-use tapepy::tape_language::Circuit;
-use tapepy::tape_language::Monomial;
+use tapepy::tape_language::{Circuit, Monomial};
 use tapepy::types::TypeExpr;
 use tapepy::typing::infer_predicate;
 
@@ -105,29 +104,20 @@ fn or_predicate_splits_sums_then_merges() {
 }
 
 #[test]
-fn compare_uses_predicate_generator_and_discards_bool() {
+fn compare_uses_predicate_generator_with_unit_output() {
     let expr = parse_expr("x == y");
     let tree = infer_predicate(&expr);
     let tape = tape_from_predicate(&tree);
 
     match tape {
-        Tape::Seq(embed, discard) => {
-            assert!(matches!(
-                *discard,
-                Tape::Discard(Monomial::Atom(TypeExpr::Bool))
-            ));
-            match *embed {
-                Tape::EmbedCircuit(circuit) => match *circuit {
-                    Circuit::Seq(_, op) => match *op {
-                        Circuit::Generator(ExprGenerator::Predicate { .. }) => {}
-                        _ => panic!("expected predicate generator"),
-                    },
-                    _ => panic!("expected seq in embedded relation circuit"),
-                },
-                _ => panic!("expected embedded circuit"),
-            }
-        }
-        _ => panic!("expected embed then discard for compare"),
+        Tape::EmbedCircuit(circuit) => match *circuit {
+            Circuit::Seq(_, op) => match *op {
+                Circuit::Generator(ExprGenerator::Predicate { .. }) => {}
+                _ => panic!("expected predicate generator"),
+            },
+            _ => panic!("expected seq in embedded relation circuit"),
+        },
+        _ => panic!("expected embedded circuit for compare"),
     }
 }
 
@@ -138,19 +128,16 @@ fn negated_relation_sets_negated_flag() {
     let tape = tape_from_predicate(&tree);
 
     match tape {
-        Tape::Seq(embed, _) => match *embed {
-            Tape::EmbedCircuit(circuit) => match *circuit {
-                Circuit::Seq(_, op) => match *op {
-                    Circuit::Generator(ExprGenerator::Predicate { negated, .. }) => {
-                        assert!(negated);
-                    }
-                    _ => panic!("expected predicate generator"),
-                },
-                _ => panic!("expected seq in embedded relation circuit"),
+        Tape::EmbedCircuit(circuit) => match *circuit {
+            Circuit::Seq(_, op) => match *op {
+                Circuit::Generator(ExprGenerator::Predicate { negated, .. }) => {
+                    assert!(negated);
+                }
+                _ => panic!("expected predicate generator"),
             },
-            _ => panic!("expected embedded circuit"),
+            _ => panic!("expected seq in embedded relation circuit"),
         },
-        _ => panic!("expected seq for negated relation"),
+        _ => panic!("expected embedded circuit for negated relation"),
     }
 }
 
@@ -161,19 +148,16 @@ fn predicate_call_uses_predicate_generator() {
     let tape = tape_from_predicate(&tree);
 
     match tape {
-        Tape::Seq(embed, _) => match *embed {
-            Tape::EmbedCircuit(circuit) => match *circuit {
-                Circuit::Seq(_, op) => match *op {
-                    Circuit::Generator(ExprGenerator::Predicate { name, .. }) => {
-                        assert_eq!(name, "bool");
-                    }
-                    _ => panic!("expected predicate generator"),
-                },
-                _ => panic!("expected seq in embedded relation circuit"),
+        Tape::EmbedCircuit(circuit) => match *circuit {
+            Circuit::Seq(_, op) => match *op {
+                Circuit::Generator(ExprGenerator::Predicate { name, .. }) => {
+                    assert_eq!(name, "bool");
+                }
+                _ => panic!("expected predicate generator"),
             },
-            _ => panic!("expected embedded circuit"),
+            _ => panic!("expected seq in embedded relation circuit"),
         },
-        _ => panic!("expected seq for predicate call"),
+        _ => panic!("expected embedded circuit for predicate call"),
     }
 }
 

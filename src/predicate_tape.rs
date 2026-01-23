@@ -1,6 +1,6 @@
 use crate::expression_circuit::circuit_from_expr_with_context;
 use crate::expression_circuit::ExprGenerator;
-use crate::tape_language::{monomial_from_entries, Circuit, Monomial, Tape};
+use crate::tape_language::{monomial_from_entries_typeexpr, Circuit, Monomial, Tape};
 use crate::types::TypeExpr;
 use crate::typing::{DeductionTree, ExprForm};
 
@@ -15,11 +15,11 @@ pub fn tape_from_predicate_with_negation(
     match tree.form() {
         ExprForm::Const(label) => match (label.as_str(), negated) {
             ("True", false) | ("False", true) => {
-                let context = monomial_from_entries(&tree.judgment().context().entries());
+                let context = monomial_from_entries_typeexpr(&tree.judgment().context().entries());
                 Tape::Discard(context)
             }
             ("False", false) | ("True", true) => {
-                let context = monomial_from_entries(&tree.judgment().context().entries());
+                let context = monomial_from_entries_typeexpr(&tree.judgment().context().entries());
                 let discard = Tape::Discard(context);
                 Tape::Seq(Box::new(discard), Box::new(Tape::Create(Monomial::one())))
             }
@@ -31,7 +31,9 @@ pub fn tape_from_predicate_with_negation(
                 let left = tape_from_predicate_with_negation(&tree.children()[0], negated);
                 let right = tape_from_predicate_with_negation(&tree.children()[1], negated);
                 let copy =
-                    Tape::copy_wires(monomial_from_entries(&tree.judgment().context().entries()));
+                    Tape::copy_wires(monomial_from_entries_typeexpr(
+                        &tree.judgment().context().entries(),
+                    ));
                 let tensor = Tape::Product(Box::new(left), Box::new(right));
                 Tape::Seq(Box::new(copy), Box::new(tensor))
             }
@@ -40,7 +42,9 @@ pub fn tape_from_predicate_with_negation(
                 let left = tape_from_predicate_with_negation(&tree.children()[0], negated);
                 let right = tape_from_predicate_with_negation(&tree.children()[1], negated);
                 let split =
-                    Tape::Split(monomial_from_entries(&tree.judgment().context().entries()));
+                    Tape::Split(monomial_from_entries_typeexpr(
+                        &tree.judgment().context().entries(),
+                    ));
                 let tensor = Tape::Sum(Box::new(left), Box::new(right));
                 let merged = Tape::Seq(Box::new(split), Box::new(tensor));
                 Tape::Seq(Box::new(merged), Box::new(Tape::Merge(Monomial::one())))
@@ -93,9 +97,7 @@ fn tape_from_relation(
         Vec::new()
     };
     let circuit = circuit_from_relation(name, &args, &context_entries, negated);
-    let embed = Tape::EmbedCircuit(Box::new(circuit));
-    let discard = Tape::Discard(Monomial::atom(TypeExpr::Bool));
-    Tape::Seq(Box::new(embed), Box::new(discard))
+    Tape::EmbedCircuit(Box::new(circuit))
 }
 
 fn circuit_from_relation(
@@ -105,7 +107,7 @@ fn circuit_from_relation(
     negated: bool,
 ) -> Circuit<TypeExpr, ExprGenerator> {
     // Build the relation circuit by wiring argument expressions from the shared context, then
-    // sequencing into a relation generator (named by the predicate) that outputs Bool.
+    // sequencing into a relation generator (named by the predicate) that outputs Unit.
     let inputs = match args.len() {
         0 => Circuit::IdOne,
         _ => {

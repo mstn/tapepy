@@ -1,6 +1,8 @@
 use open_hypergraphs::lax::{Monoidal, OpenHypergraph};
 use std::fmt;
 
+use crate::types::TypeExpr;
+
 pub mod circuit;
 pub mod tape;
 
@@ -109,6 +111,16 @@ impl<S> Polynomial<S> {
 pub fn monomial_from_entries<S: Clone>(entries: &[(String, S)]) -> Monomial<S> {
     entries.iter().fold(Monomial::one(), |acc, (_, ty)| {
         Monomial::product(acc, Monomial::atom(ty.clone()))
+    })
+}
+
+pub fn monomial_from_entries_typeexpr(entries: &[(String, TypeExpr)]) -> Monomial<TypeExpr> {
+    entries.iter().fold(Monomial::one(), |acc, (_, ty)| {
+        if *ty == TypeExpr::Unit {
+            acc
+        } else {
+            Monomial::product(acc, Monomial::atom(ty.clone()))
+        }
     })
 }
 
