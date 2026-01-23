@@ -88,20 +88,112 @@ fn assign_is_embedded_seq_circuit() {
 #[test]
 fn seq_of_assigns_embeds_seq_circuit() {
     let (tree, tape) = infer_tape("x = 1\ny = 2");
-    let context_entries = tree.judgment().context().entries();
-    let expected_context = monomial_from_entries(context_entries);
-    let arity = tape.arity();
+    let mut iter = tree.children().iter().filter_map(|child| match child {
+        tapepy::command_typing::CommandChild::Command(cmd) => Some(cmd),
+        _ => None,
+    });
+    let left_cmd = iter.next().expect("sequence expects left command");
+    let right_cmd = iter.next().expect("sequence expects right command");
+
+    let left_entries = left_cmd.judgment().context().entries();
+    let right_entries = right_cmd.judgment().context().entries();
+    assert_eq!(left_entries.len(), 2);
+    assert_eq!(right_entries.len(), 2);
+    let x_ty = left_entries[0].1.clone();
+    let y_ty_left = left_entries[1].1.clone();
+    let y_ty_right = right_entries[1].1.clone();
 
     match tape {
         Tape::EmbedCircuit(circuit) => match *circuit {
-            Circuit::Seq(_, _) => {}
+            Circuit::Seq(left, right) => {
+                match *left {
+                    Circuit::Seq(split, updated) => {
+                        assert_eq!(
+                            *split,
+                            Circuit::product(
+                                Circuit::Id(x_ty.clone()),
+                                Circuit::Copy(y_ty_left.clone())
+                            )
+                        );
+
+                        match *updated {
+                            Circuit::Product(expr, tail) => {
+                                assert_eq!(*tail, Circuit::Id(y_ty_left.clone()));
+                                match *expr {
+                                    Circuit::Seq(wiring, gen) => {
+                                        let expected_wiring = Circuit::product(
+                                            Circuit::Discard(x_ty.clone()),
+                                            Circuit::Discard(y_ty_left.clone()),
+                                        );
+                                        assert_eq!(*wiring, expected_wiring);
+                                        match *gen {
+                                            Circuit::Generator(ExprGenerator::Function {
+                                                name,
+                                                input_types,
+                                                output_types,
+                                            }) => {
+                                                assert_eq!(name, "1");
+                                                assert!(input_types.is_empty());
+                                                assert_eq!(output_types, vec![TypeExpr::Int]);
+                                            }
+                                            _ => panic!("expected constant generator in assignment"),
+                                        }
+                                    }
+                                    _ => panic!("expected seq for expression circuit"),
+                                }
+                            }
+                            _ => panic!("expected product for updated circuit"),
+                        }
+                    }
+                    _ => panic!("expected seq circuit for assignment"),
+                }
+
+                match *right {
+                    Circuit::Seq(split, updated) => {
+                        assert_eq!(
+                            *split,
+                            Circuit::product(
+                                Circuit::Copy(x_ty.clone()),
+                                Circuit::Id(y_ty_right.clone())
+                            )
+                        );
+
+                        match *updated {
+                            Circuit::Product(head, expr) => {
+                                assert_eq!(*head, Circuit::Id(x_ty.clone()));
+                                match *expr {
+                                    Circuit::Seq(wiring, gen) => {
+                                        let expected_wiring = Circuit::product(
+                                            Circuit::Discard(x_ty.clone()),
+                                            Circuit::Discard(y_ty_right.clone()),
+                                        );
+                                        assert_eq!(*wiring, expected_wiring);
+                                        match *gen {
+                                            Circuit::Generator(ExprGenerator::Function {
+                                                name,
+                                                input_types,
+                                                output_types,
+                                            }) => {
+                                                assert_eq!(name, "2");
+                                                assert!(input_types.is_empty());
+                                                assert_eq!(output_types, vec![TypeExpr::Int]);
+                                            }
+                                            _ => panic!("expected constant generator in assignment"),
+                                        }
+                                    }
+                                    _ => panic!("expected seq for expression circuit"),
+                                }
+                            }
+                            _ => panic!("expected product for updated circuit"),
+                        }
+                    }
+                    _ => panic!("expected seq circuit for assignment"),
+                }
+            }
             _ => panic!("expected seq circuit for command sequence"),
         },
         _ => panic!("expected embedded circuit for command sequence"),
     }
-
-    assert_eq!(arity.inputs, expected_context.len());
-    assert_eq!(arity.outputs, expected_context.len());
 }
 
 #[test]
@@ -144,3 +236,5 @@ fn if_builds_copy_branches_and_join() {
         _ => panic!("expected outer seq with copy for if"),
     }
 }
+
+ 
