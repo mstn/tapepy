@@ -1,6 +1,6 @@
 use std::fmt;
 
-use crate::tape_language::{Circuit, GeneratorShape, GeneratorTypes, Monomial};
+use crate::tape_language::{product_many, Circuit, GeneratorShape, GeneratorTypes, Monomial};
 use crate::types::TypeExpr;
 use crate::typing::{DeductionTree, ExprForm};
 
@@ -158,17 +158,6 @@ pub fn circuit_from_expr_with_context(
     let wiring = wiring_circuit_for_expression(tree, context_entries);
     let expr = circuit_from_expr(tree);
     Circuit::Seq(Box::new(wiring), Box::new(expr))
-}
-
-fn product_many<S, G>(mut circuits: Vec<Circuit<S, G>>) -> Circuit<S, G> {
-    if circuits.is_empty() {
-        return Circuit::IdOne;
-    }
-    let mut acc = circuits.remove(0);
-    for circuit in circuits {
-        acc = Circuit::Product(Box::new(acc), Box::new(circuit));
-    }
-    acc
 }
 
 fn assert_child_count(tree: &DeductionTree, expected: usize, label: &str) {

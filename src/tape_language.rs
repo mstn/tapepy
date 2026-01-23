@@ -201,14 +201,7 @@ impl TapeArity {
 impl<S, G: GeneratorShape> Circuit<S, G> {
     pub fn id(terms: Vec<S>) -> Self {
         let mut circuits: Vec<Self> = terms.into_iter().map(Circuit::Id).collect();
-        if circuits.is_empty() {
-            return Circuit::IdOne;
-        }
-        let mut acc = circuits.remove(0);
-        for circuit in circuits {
-            acc = Circuit::Product(Box::new(acc), Box::new(circuit));
-        }
-        acc
+        product_many(circuits)
     }
 
     pub fn copy_n(terms: Vec<S>) -> Self
@@ -691,6 +684,13 @@ fn identity_for_types<S: Clone, G>(types: &[S]) -> Circuit<S, G> {
     let mut circuits = Vec::with_capacity(types.len());
     for ty in types {
         circuits.push(Circuit::Id(ty.clone()));
+    }
+    product_many(circuits)
+}
+
+pub fn product_many<S, G>(mut circuits: Vec<Circuit<S, G>>) -> Circuit<S, G> {
+    if circuits.is_empty() {
+        return Circuit::IdOne;
     }
     let mut acc = circuits.remove(0);
     for circuit in circuits {
