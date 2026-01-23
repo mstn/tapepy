@@ -85,8 +85,7 @@ fn tape_from_relation(
     let circuit = circuit_from_relation(name, &args, &context_entries, negated);
     let embed = Tape::EmbedCircuit(Box::new(circuit));
     let discard = Tape::Discard(Monomial::atom(TypeExpr::Unit));
-    let embed = Tape::Seq(Box::new(embed), Box::new(discard));
-    embed
+    Tape::Seq(Box::new(embed), Box::new(discard))
 }
 
 fn circuit_from_relation(
