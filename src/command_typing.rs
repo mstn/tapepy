@@ -362,7 +362,98 @@ fn collect_free_vars_expr(expr: &Expr, context: &mut Context) {
                 collect_free_vars_expr(arg, context);
             }
         }
+        Expr::Compare(compare) => {
+            collect_free_vars_expr(&compare.left, context);
+            for comparator in &compare.comparators {
+                collect_free_vars_expr(comparator, context);
+            }
+        }
+        Expr::IfExp(ifexp) => {
+            collect_free_vars_expr(&ifexp.test, context);
+            collect_free_vars_expr(&ifexp.body, context);
+            collect_free_vars_expr(&ifexp.orelse, context);
+        }
+        Expr::List(list) => {
+            for elt in &list.elts {
+                collect_free_vars_expr(elt, context);
+            }
+        }
+        Expr::Tuple(tuple) => {
+            for elt in &tuple.elts {
+                collect_free_vars_expr(elt, context);
+            }
+        }
+        Expr::Dict(dict) => {
+            for key in &dict.keys {
+                if let Some(key) = key {
+                    collect_free_vars_expr(key, context);
+                }
+            }
+            for value in &dict.values {
+                collect_free_vars_expr(value, context);
+            }
+        }
+        Expr::Set(set) => {
+            for elt in &set.elts {
+                collect_free_vars_expr(elt, context);
+            }
+        }
+        Expr::Attribute(attr) => {
+            collect_free_vars_expr(&attr.value, context);
+        }
+        Expr::Subscript(sub) => {
+            collect_free_vars_expr(&sub.value, context);
+            collect_free_vars_expr(&sub.slice, context);
+        }
+        Expr::Slice(slice) => {
+            if let Some(lower) = &slice.lower {
+                collect_free_vars_expr(lower, context);
+            }
+            if let Some(upper) = &slice.upper {
+                collect_free_vars_expr(upper, context);
+            }
+            if let Some(step) = &slice.step {
+                collect_free_vars_expr(step, context);
+            }
+        }
+        Expr::GeneratorExp(gen) => {
+            collect_free_vars_expr(&gen.elt, context);
+            for comp in &gen.generators {
+                collect_free_vars_expr(&comp.iter, context);
+                for if_expr in &comp.ifs {
+                    collect_free_vars_expr(if_expr, context);
+                }
+            }
+        }
+        Expr::ListComp(comp) => {
+            collect_free_vars_expr(&comp.elt, context);
+            for gen in &comp.generators {
+                collect_free_vars_expr(&gen.iter, context);
+                for if_expr in &gen.ifs {
+                    collect_free_vars_expr(if_expr, context);
+                }
+            }
+        }
+        Expr::SetComp(comp) => {
+            collect_free_vars_expr(&comp.elt, context);
+            for gen in &comp.generators {
+                collect_free_vars_expr(&gen.iter, context);
+                for if_expr in &gen.ifs {
+                    collect_free_vars_expr(if_expr, context);
+                }
+            }
+        }
+        Expr::DictComp(comp) => {
+            collect_free_vars_expr(&comp.key, context);
+            collect_free_vars_expr(&comp.value, context);
+            for gen in &comp.generators {
+                collect_free_vars_expr(&gen.iter, context);
+                for if_expr in &gen.ifs {
+                    collect_free_vars_expr(if_expr, context);
+                }
+            }
+        }
         Expr::Constant(_) => {}
-        _ => {}
+        _ => panic!("unsupported expression in free-var collection: {:?}", expr),
     }
 }
