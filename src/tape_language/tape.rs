@@ -61,7 +61,7 @@ impl TapeArity {
 }
 
 impl<S, G: GeneratorShape> Tape<S, G> {
-    pub fn typing(&self) -> TapeArity {
+    pub fn arity(&self) -> TapeArity {
         match self {
             Tape::Id(mono) => {
                 let len = mono.len();
@@ -69,7 +69,7 @@ impl<S, G: GeneratorShape> Tape<S, G> {
             }
             Tape::IdZero => TapeArity::new(0, 0),
             Tape::EmbedCircuit(circuit) => {
-                let ty = circuit.typing();
+                let ty = circuit.arity();
                 TapeArity::new(ty.inputs, ty.outputs)
             }
             Tape::Swap { left, right } => {
@@ -77,8 +77,8 @@ impl<S, G: GeneratorShape> Tape<S, G> {
                 TapeArity::new(inputs, inputs)
             }
             Tape::Seq(left, right) => {
-                let left_ty = left.typing();
-                let right_ty = right.typing();
+                let left_ty = left.arity();
+                let right_ty = right.arity();
                 if left_ty.outputs != right_ty.inputs {
                     panic!(
                         "sequence arity mismatch: {} vs {}",
@@ -88,16 +88,16 @@ impl<S, G: GeneratorShape> Tape<S, G> {
                 TapeArity::new(left_ty.inputs, right_ty.outputs)
             }
             Tape::Product(left, right) => {
-                let left_ty = left.typing();
-                let right_ty = right.typing();
+                let left_ty = left.arity();
+                let right_ty = right.arity();
                 TapeArity::new(
                     left_ty.inputs + right_ty.inputs,
                     left_ty.outputs + right_ty.outputs,
                 )
             }
             Tape::Sum(left, right) => {
-                let left_ty = left.typing();
-                let right_ty = right.typing();
+                let left_ty = left.arity();
+                let right_ty = right.arity();
                 if left_ty.inputs != right_ty.inputs || left_ty.outputs != right_ty.outputs {
                     panic!(
                         "sum arity mismatch: {}x{} vs {}x{}",
@@ -239,7 +239,7 @@ fn embed_circuit<S: Clone + PartialEq, G: GeneratorShape + GeneratorTypes<S> + C
             outputs.into_iter().map(Monomial::atom).collect(),
         )
     } else {
-        let arity = circuit.typing();
+        let arity = circuit.arity();
         OpenHypergraph::singleton(
             lifted,
             fresh_monomials(fresh_sort, arity.inputs),

@@ -108,3 +108,35 @@ fn wiring_circuit_for_context_empty_inputs_discards_all() {
 
     assert_eq!(circuit, Circuit::Discard('A'));
 }
+
+#[test]
+fn arity_reports_arity() {
+    let circuit: Circuit<char, ()> = Circuit::Seq(
+        Box::new(Circuit::Copy('a')),
+        Box::new(Circuit::Join('a')),
+    );
+
+    let arity = circuit.arity();
+    assert_eq!(arity.inputs, 1);
+    assert_eq!(arity.outputs, 1);
+}
+
+#[test]
+fn type_returns_inputs_and_outputs() {
+    let circuit: Circuit<char, ()> = Circuit::Product(
+        Box::new(Circuit::Id('a')),
+        Box::new(Circuit::Copy('b')),
+    );
+    let ty = circuit.io_types().unwrap();
+    assert_eq!(ty.0, vec!['a', 'b']);
+    assert_eq!(ty.1, vec!['a', 'b', 'b']);
+}
+
+#[test]
+fn type_returns_none_on_mismatch() {
+    let circuit: Circuit<char, ()> = Circuit::Seq(
+        Box::new(Circuit::Id('a')),
+        Box::new(Circuit::Id('b')),
+    );
+    assert!(circuit.io_types().is_none());
+}

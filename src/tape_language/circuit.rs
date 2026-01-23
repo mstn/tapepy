@@ -38,12 +38,6 @@ pub struct CircuitArity {
     pub outputs: usize,
 }
 
-impl CircuitArity {
-    pub fn new(inputs: usize, outputs: usize) -> Self {
-        Self { inputs, outputs }
-    }
-}
-
 impl<S, G> Circuit<S, G> {
     pub fn id(terms: Vec<S>) -> Self {
         let circuits: Vec<Self> = terms.into_iter().map(Circuit::Id).collect();
@@ -220,34 +214,58 @@ impl<S, G> Circuit<S, G> {
 }
 
 impl<S, G: GeneratorShape> Circuit<S, G> {
-    pub fn typing(&self) -> CircuitArity {
+    pub fn arity(&self) -> CircuitArity {
         match self {
-            Circuit::Id(_) => CircuitArity::new(1, 1),
-            Circuit::IdOne => CircuitArity::new(0, 0),
-            Circuit::Generator(gen) => CircuitArity::new(gen.arity(), gen.coarity()),
-            Circuit::Swap { .. } => CircuitArity::new(2, 2),
+            Circuit::Id(_) => CircuitArity {
+                inputs: 1,
+                outputs: 1,
+            },
+            Circuit::IdOne => CircuitArity {
+                inputs: 0,
+                outputs: 0,
+            },
+            Circuit::Generator(gen) => CircuitArity {
+                inputs: gen.arity(),
+                outputs: gen.coarity(),
+            },
+            Circuit::Swap { .. } => CircuitArity {
+                inputs: 2,
+                outputs: 2,
+            },
             Circuit::Seq(left, right) => {
-                let left_ty = left.typing();
-                let right_ty = right.typing();
+                let left_ty = left.arity();
+                let right_ty = right.arity();
                 if left_ty.outputs != right_ty.inputs {
                     panic!(
                         "sequence arity mismatch: {} vs {}",
                         left_ty.outputs, right_ty.inputs
                     );
                 }
-                CircuitArity::new(left_ty.inputs, right_ty.outputs)
+                CircuitArity {
+                    inputs: left_ty.inputs,
+                    outputs: right_ty.outputs,
+                }
             }
             Circuit::Product(left, right) => {
-                let left_ty = left.typing();
-                let right_ty = right.typing();
-                CircuitArity::new(
-                    left_ty.inputs + right_ty.inputs,
-                    left_ty.outputs + right_ty.outputs,
-                )
+                let left_ty = left.arity();
+                let right_ty = right.arity();
+                CircuitArity {
+                    inputs: left_ty.inputs + right_ty.inputs,
+                    outputs: left_ty.outputs + right_ty.outputs,
+                }
             }
-            Circuit::Copy(_) => CircuitArity::new(1, 2),
-            Circuit::Discard(_) => CircuitArity::new(1, 0),
-            Circuit::Join(_) => CircuitArity::new(2, 1),
+            Circuit::Copy(_) => CircuitArity {
+                inputs: 1,
+                outputs: 2,
+            },
+            Circuit::Discard(_) => CircuitArity {
+                inputs: 1,
+                outputs: 0,
+            },
+            Circuit::Join(_) => CircuitArity {
+                inputs: 2,
+                outputs: 1,
+            },
         }
     }
 }

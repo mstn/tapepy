@@ -186,7 +186,7 @@ fn id_from_entries(entries: &[(String, TypeExpr)]) -> Tape<TypeExpr, ExprGenerat
 }
 
 fn tensor_tapes(mut tapes: Vec<Tape<TypeExpr, ExprGenerator>>) -> Tape<TypeExpr, ExprGenerator> {
-    tapes.retain(|tape| tape.typing().inputs != 0 || tape.typing().outputs != 0);
+    tapes.retain(|tape| tape.arity().inputs != 0 || tape.arity().outputs != 0);
     if tapes.is_empty() {
         return Tape::IdZero;
     }
