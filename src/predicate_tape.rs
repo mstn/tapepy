@@ -132,7 +132,10 @@ fn circuit_from_relation(
 }
 
 fn context_monomial(tree: &DeductionTree) -> Monomial<TypeExpr> {
-    context_monomial_from_entries(tree.judgment().context().entries())
+    let entries = tree.judgment().context().entries();
+    entries.iter().fold(Monomial::one(), |acc, (_, ty)| {
+        Monomial::product(acc, Monomial::atom(ty.clone()))
+    })
 }
 
 fn context_entries_from_args(args: &[&DeductionTree]) -> Vec<(String, TypeExpr)> {
@@ -141,10 +144,4 @@ fn context_entries_from_args(args: &[&DeductionTree]) -> Vec<(String, TypeExpr)>
     } else {
         Vec::new()
     }
-}
-
-fn context_monomial_from_entries(entries: &[(String, TypeExpr)]) -> Monomial<TypeExpr> {
-    entries.iter().fold(Monomial::one(), |acc, (_, ty)| {
-        Monomial::product(acc, Monomial::atom(ty.clone()))
-    })
 }
