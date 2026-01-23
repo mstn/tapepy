@@ -140,20 +140,16 @@ fn infer_assign(assign: &StmtAssign, context: &Context) -> (CommandDerivationTre
         .unwrap_or_else(|| panic!("assignment target `{}` not in context", target_name));
 
     let expr_tree = infer_expression_in_context(&assign.value, context);
-    let new_target_ty = expr_tree.judgment().ty().clone();
-    let mut updated_context = context.clone();
-    updated_context.set_var(&target_name, new_target_ty);
-
     let cmd = format!("{} := {}", target_name, expr_tree.judgment().expr());
     (
         make_node(
             "Assign",
-            &updated_context,
+            context,
             cmd,
             vec![CommandChild::Expression(expr_tree)],
             CommandForm::Assign(target_name),
         ),
-        updated_context,
+        context.clone(),
     )
 }
 

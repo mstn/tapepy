@@ -72,7 +72,7 @@ fn assign_is_embedded_seq_circuit() {
                             }) => {
                                 assert_eq!(name, "1");
                                 assert!(input_types.is_empty());
-                                assert_eq!(output_types, vec![lhs_ty.clone()]);
+                                assert_eq!(output_types, vec![TypeExpr::Int]);
                             }
                             _ => panic!("expected constant generator in assignment"),
                         }
@@ -203,15 +203,19 @@ fn seq_of_assigns_embeds_seq_circuit() {
 
 #[test]
 fn if_builds_copy_branches_and_join() {
-    let (tree, tape) = infer_tape("if x > 0:\n  y = 1\nelse:\n  y = 2");
-    let context_entries = tree.judgment().context().entries();
-    let expected_types: Vec<TypeExpr> = context_entries.iter().map(|(_, ty)| ty.clone()).collect();
+    let (_, tape) = infer_tape("if x > 0:\n  y = 1\nelse:\n  y = 2");
 
     match tape {
         Tape::Seq(copy, tail) => {
             match *copy {
                 Tape::EmbedCircuit(circuit) => {
-                    assert_eq!(*circuit, Circuit::copy_wires(expected_types.clone()));
+                    assert_eq!(
+                        *circuit,
+                        Circuit::copy_wires(vec![
+                            TypeExpr::Var(tapepy::types::TypeVar(0)),
+                            TypeExpr::Var(tapepy::types::TypeVar(1)),
+                        ])
+                    );
                 }
                 _ => panic!("expected embedded copy circuit for if"),
             }
@@ -219,7 +223,13 @@ fn if_builds_copy_branches_and_join() {
                 Tape::Seq(branches, join) => {
                     match *join {
                         Tape::EmbedCircuit(circuit) => {
-                            assert_eq!(*circuit, Circuit::join_wires(expected_types.clone()));
+                            assert_eq!(
+                                *circuit,
+                                Circuit::join_wires(vec![
+                                    TypeExpr::Var(tapepy::types::TypeVar(0)),
+                                    TypeExpr::Var(tapepy::types::TypeVar(1)),
+                                ])
+                            );
                         }
                         _ => panic!("expected embedded join circuit for if"),
                     }
@@ -228,7 +238,13 @@ fn if_builds_copy_branches_and_join() {
                             assert_eq!(tape_io_types(&left), tape_io_types(&right));
                             assert_eq!(
                                 tape_io_types(&left),
-                                Some((expected_types.clone(), expected_types.clone()))
+                                Some((
+                                    vec![
+                                        TypeExpr::Var(tapepy::types::TypeVar(0)),
+                                        TypeExpr::Var(tapepy::types::TypeVar(1)),
+                                    ],
+                                    vec![TypeExpr::Var(tapepy::types::TypeVar(0)), TypeExpr::Int]
+                                ))
                             );
                         }
                         _ => panic!("expected sum of branches"),
