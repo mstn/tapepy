@@ -1,7 +1,8 @@
 use std::fmt;
 
 use crate::tape_language::{
-    copy_many, product_many, Circuit, GeneratorShape, GeneratorTypes, Monomial,
+    copy_many, permute_circuit, product_many, Circuit, GeneratorShape, GeneratorTypes, Monomial,
+    Permutation,
 };
 use crate::types::TypeExpr;
 use crate::typing::{DeductionTree, ExprForm};
@@ -227,83 +228,4 @@ fn permutation_for_inputs(
         permutation.push(use_idx);
     }
     Permutation(permutation)
-}
-
-fn permute_circuit(
-    types: &[TypeExpr],
-    permutation: &Permutation,
-) -> Circuit<TypeExpr, ExprGenerator> {
-    let mut current: Vec<usize> = (0..types.len()).collect();
-    let mut current_types: Vec<TypeExpr> = types.to_vec();
-    let mut swaps = Vec::new();
-
-    for target_idx in 0..permutation.0.len() {
-        let desired = permutation.0[target_idx];
-        let mut pos = current
-            .iter()
-            .position(|idx| *idx == desired)
-            .unwrap_or_else(|| panic!("permutation missing index {}", desired));
-        while pos > target_idx {
-            swaps.push(swap_adjacent(&current_types, pos - 1));
-            current.swap(pos - 1, pos);
-            current_types.swap(pos - 1, pos);
-            pos -= 1;
-        }
-    }
-
-    if swaps.is_empty() {
-        identity_for_types(types)
-    } else {
-        swaps
-            .into_iter()
-            .fold(identity_for_types(types), |acc, swap| {
-                Circuit::Seq(Box::new(acc), Box::new(swap))
-            })
-    }
-}
-
-fn identity_for_types(types: &[TypeExpr]) -> Circuit<TypeExpr, ExprGenerator> {
-    if types.is_empty() {
-        return Circuit::IdOne;
-    }
-    let mut circuits = Vec::with_capacity(types.len());
-    for ty in types {
-        circuits.push(Circuit::Id(ty.clone()));
-    }
-    product_many(circuits)
-}
-
-fn swap_adjacent(types: &[TypeExpr], index: usize) -> Circuit<TypeExpr, ExprGenerator> {
-    let left = identity_for_types(&types[..index]);
-    let mid = Circuit::Swap {
-        left: types[index].clone(),
-        right: types[index + 1].clone(),
-    };
-    let right = identity_for_types(&types[index + 2..]);
-
-    match (left, right) {
-        (Circuit::IdOne, Circuit::IdOne) => mid,
-        (Circuit::IdOne, right) => Circuit::Product(Box::new(mid), Box::new(right)),
-        (left, Circuit::IdOne) => Circuit::Product(Box::new(left), Box::new(mid)),
-        (left, right) => {
-            let mid_right = Circuit::Product(Box::new(mid), Box::new(right));
-            Circuit::Product(Box::new(left), Box::new(mid_right))
-        }
-    }
-}
-
-struct Permutation(Vec<usize>);
-
-impl Permutation {
-    fn is_identity(&self) -> bool {
-        self.0.iter().enumerate().all(|(idx, val)| idx == *val)
-    }
-}
-
-fn lookup_var_type(name: &str, context_entries: &[(String, TypeExpr)]) -> TypeExpr {
-    context_entries
-        .iter()
-        .find(|(var, _)| var == name)
-        .map(|(_, ty)| ty.clone())
-        .unwrap_or_else(|| panic!("variable `{}` not in context", name))
 }

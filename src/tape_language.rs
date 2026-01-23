@@ -1,6 +1,7 @@
 use open_hypergraphs::lax::{Arrow as _, Monoidal, OpenHypergraph};
 use std::fmt;
 
+
 pub trait GeneratorShape {
     fn arity(&self) -> usize;
     fn coarity(&self) -> usize;
@@ -235,7 +236,7 @@ impl<S, G: GeneratorShape> Circuit<S, G> {
             permutation.push(2 * i + 1);
         }
 
-        let permute = permute_circuit(&grouped_types, &permutation);
+        let permute = permute_circuit(&grouped_types, &Permutation(permutation));
         Circuit::Seq(Box::new(acc), Box::new(permute))
     }
 
@@ -277,7 +278,7 @@ impl<S, G: GeneratorShape> Circuit<S, G> {
             inverse[val] = idx;
         }
 
-        let permute = permute_circuit(&interleaved_types, &inverse);
+        let permute = permute_circuit(&interleaved_types, &Permutation(inverse));
         Circuit::Seq(Box::new(permute), Box::new(acc))
     }
 
@@ -490,11 +491,7 @@ impl<S: Clone + PartialEq, G: GeneratorShape + GeneratorTypes<S> + Clone> Tape<S
                     for node_id in &child_graph.targets {
                         targets.push(Monomial::atom(nodes[node_id.0].clone()));
                     }
-                    OpenHypergraph::singleton(
-                        TapeEdge::Embedded(child_graph),
-                        sources,
-                        targets,
-                    )
+                    OpenHypergraph::singleton(TapeEdge::Embedded(child_graph), sources, targets)
                 }
             },
             Tape::Swap { left, right } => {
@@ -647,8 +644,8 @@ fn fresh_sorts<S, F: FnMut() -> S>(fresh_sort: &mut F, count: usize) -> Vec<S> {
     (0..count).map(|_| fresh_sort()).collect()
 }
 
-fn permute_circuit<S: Clone, G>(types: &[S], permutation: &[usize]) -> Circuit<S, G> {
-    if permutation.iter().enumerate().all(|(idx, val)| idx == *val) {
+pub fn permute_circuit<S: Clone, G>(types: &[S], permutation: &Permutation) -> Circuit<S, G> {
+    if permutation.is_identity() {
         return identity_for_types(types);
     }
 
@@ -656,8 +653,8 @@ fn permute_circuit<S: Clone, G>(types: &[S], permutation: &[usize]) -> Circuit<S
     let mut current_types: Vec<S> = types.to_vec();
     let mut swaps = Vec::new();
 
-    for target_idx in 0..permutation.len() {
-        let desired = permutation[target_idx];
+    for target_idx in 0..permutation.0.len() {
+        let desired = permutation.0[target_idx];
         let mut pos = current
             .iter()
             .position(|idx| *idx == desired)
@@ -675,6 +672,14 @@ fn permute_circuit<S: Clone, G>(types: &[S], permutation: &[usize]) -> Circuit<S
         .fold(identity_for_types(types), |acc, swap| {
             Circuit::Seq(Box::new(acc), Box::new(swap))
         })
+}
+
+pub struct Permutation(pub Vec<usize>);
+
+impl Permutation {
+    pub fn is_identity(&self) -> bool {
+        self.0.iter().enumerate().all(|(idx, val)| idx == *val)
+    }
 }
 
 fn identity_for_types<S: Clone, G>(types: &[S]) -> Circuit<S, G> {
