@@ -113,7 +113,7 @@ fn if_tape(tree: &CommandDerivationTree) -> Tape<TypeExpr, ExprGenerator> {
         })
         .collect::<Vec<_>>();
     let copy = Tape::EmbedCircuit(Box::new(Circuit::copy_wires(context_types.clone())));
-    let join = Tape::EmbedCircuit(Box::new(Circuit::join_n(context_types)));
+    let join = Tape::EmbedCircuit(Box::new(Circuit::join_wires(context_types)));
     let branches = Tape::Sum(Box::new(left), Box::new(right));
     Tape::Seq(
         Box::new(copy),

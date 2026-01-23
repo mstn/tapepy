@@ -103,7 +103,7 @@ impl<S, G> Circuit<S, G> {
         }
     }
 
-    pub fn join_n(terms: Vec<S>) -> Self
+    pub fn join_wires(terms: Vec<S>) -> Self
     where
         S: Clone,
     {
