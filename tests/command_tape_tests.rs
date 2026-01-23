@@ -57,17 +57,29 @@ fn assign_is_embedded_seq_circuit() {
     let lhs_ty = context_entries[0].1.clone();
 
     match tape {
-        Tape::EmbedCircuit(updated) => match *updated {
-            Circuit::Generator(ExprGenerator::Function {
-                name,
-                input_types,
-                output_types,
-            }) => {
-                assert_eq!(name, "1");
-                assert!(input_types.is_empty());
-                assert_eq!(output_types, vec![lhs_ty.clone()]);
+        Tape::EmbedCircuit(circuit) => match *circuit {
+            Circuit::Seq(split, updated) => {
+                assert_eq!(*split, Circuit::Id(lhs_ty.clone()));
+                match *updated {
+                    Circuit::Seq(wiring, expr) => {
+                        assert_eq!(*wiring, Circuit::Discard(lhs_ty.clone()));
+                        match *expr {
+                            Circuit::Generator(ExprGenerator::Function {
+                                name,
+                                input_types,
+                                output_types,
+                            }) => {
+                                assert_eq!(name, "1");
+                                assert!(input_types.is_empty());
+                                assert_eq!(output_types, vec![lhs_ty.clone()]);
+                            }
+                            _ => panic!("expected constant generator in assignment"),
+                        }
+                    }
+                    _ => panic!("expected seq for updated circuit"),
+                }
             }
-            _ => panic!("expected constant generator in assignment"),
+            _ => panic!("expected seq circuit for assignment"),
         },
         _ => panic!("expected embedded circuit for assignment"),
     }
