@@ -1,8 +1,7 @@
 use std::fmt;
 
 use crate::tape_language::{
-    copy_many, permute_circuit, product_many, Circuit, GeneratorShape, GeneratorTypes, Monomial,
-    Permutation,
+    product_many, wiring_circuit_for_context, Circuit, GeneratorShape, GeneratorTypes, Monomial,
 };
 use crate::types::TypeExpr;
 use crate::typing::{DeductionTree, ExprForm};
@@ -169,63 +168,5 @@ fn wiring_circuit_for_expression(
 ) -> Circuit<TypeExpr, ExprGenerator> {
     // Determine the exact order and multiplicity of variable uses in the expression.
     let input_vars = tree.expr_input_vars();
-    let mut counts = Vec::with_capacity(context_entries.len());
-    for (name, _) in context_entries {
-        let count = input_vars.iter().filter(|var| *var == name).count();
-        counts.push(count);
-    }
-
-    // For each context entry, build the required fanout (or discard) circuit.
-    let mut var_circuits = Vec::with_capacity(context_entries.len());
-    for ((_, ty), count) in context_entries.iter().zip(counts.iter().copied()) {
-        var_circuits.push(copy_many(ty.clone(), count));
-    }
-    let grouped = product_many(var_circuits);
-
-    // Reorder grouped wires to match the expression's traversal order.
-    let grouped_types = grouped_types(context_entries, &counts);
-    let permutation = permutation_for_inputs(context_entries, &input_vars, &counts);
-    if permutation.is_identity() {
-        grouped
-    } else {
-        let perm = permute_circuit(&grouped_types, &permutation);
-        Circuit::Seq(Box::new(grouped), Box::new(perm))
-    }
-}
-
-fn grouped_types(context_entries: &[(String, TypeExpr)], counts: &[usize]) -> Vec<TypeExpr> {
-    let mut types = Vec::new();
-    for ((_, ty), count) in context_entries.iter().zip(counts.iter().copied()) {
-        for _ in 0..count {
-            types.push(ty.clone());
-        }
-    }
-    types
-}
-
-fn permutation_for_inputs(
-    context_entries: &[(String, TypeExpr)],
-    input_vars: &[String],
-    counts: &[usize],
-) -> Permutation {
-    let mut offsets = Vec::with_capacity(counts.len());
-    let mut running = 0;
-    for count in counts {
-        offsets.push(running);
-        running += *count;
-    }
-
-    let mut seen = vec![0usize; counts.len()];
-    let mut permutation = Vec::with_capacity(input_vars.len());
-    for name in input_vars {
-        let idx = context_entries
-            .iter()
-            .position(|(var, _)| var == name)
-            .unwrap_or_else(|| panic!("variable `{}` not in context", name));
-        let offset = offsets[idx];
-        let use_idx = offset + seen[idx];
-        seen[idx] += 1;
-        permutation.push(use_idx);
-    }
-    Permutation(permutation)
+    wiring_circuit_for_context(context_entries, &input_vars)
 }
