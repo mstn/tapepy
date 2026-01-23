@@ -5,6 +5,7 @@ use tapepy::command_typing::infer_command_from_suite;
 use tapepy::expression_circuit::ExprGenerator;
 use tapepy::tape_language::circuit::Circuit;
 use tapepy::tape_language::monomial_from_entries;
+use tapepy::tape_language::tape::monomial_atoms;
 use tapepy::tape_language::tape::Tape;
 use tapepy::tape_language::Monomial;
 use tapepy::types::TypeExpr;
@@ -136,7 +137,9 @@ fn seq_of_assigns_embeds_seq_circuit() {
                                                 assert!(input_types.is_empty());
                                                 assert_eq!(output_types, vec![TypeExpr::Int]);
                                             }
-                                            _ => panic!("expected constant generator in assignment"),
+                                            _ => {
+                                                panic!("expected constant generator in assignment")
+                                            }
                                         }
                                     }
                                     _ => panic!("expected seq for expression circuit"),
@@ -178,7 +181,9 @@ fn seq_of_assigns_embeds_seq_circuit() {
                                                 assert!(input_types.is_empty());
                                                 assert_eq!(output_types, vec![TypeExpr::Int]);
                                             }
-                                            _ => panic!("expected constant generator in assignment"),
+                                            _ => {
+                                                panic!("expected constant generator in assignment")
+                                            }
                                         }
                                     }
                                     _ => panic!("expected seq for expression circuit"),
@@ -200,8 +205,6 @@ fn seq_of_assigns_embeds_seq_circuit() {
 fn if_builds_copy_branches_and_join() {
     let (tree, tape) = infer_tape("if x > 0:\n  y = 1\nelse:\n  y = 2");
     let context_entries = tree.judgment().context().entries();
-    let expected_context = monomial_from_entries(context_entries);
-    let expected_len = expected_context.len();
     let expected_types: Vec<TypeExpr> = context_entries.iter().map(|(_, ty)| ty.clone()).collect();
 
     match tape {
@@ -222,10 +225,11 @@ fn if_builds_copy_branches_and_join() {
                     }
                     match *branches {
                         Tape::Sum(left, right) => {
-                            assert_eq!(left.arity().inputs, expected_len);
-                            assert_eq!(left.arity().outputs, expected_len);
-                            assert_eq!(right.arity().inputs, expected_len);
-                            assert_eq!(right.arity().outputs, expected_len);
+                            assert_eq!(tape_io_types(&left), tape_io_types(&right));
+                            assert_eq!(
+                                tape_io_types(&left),
+                                Some((expected_types.clone(), expected_types.clone()))
+                            );
                         }
                         _ => panic!("expected sum of branches"),
                     }
@@ -237,4 +241,75 @@ fn if_builds_copy_branches_and_join() {
     }
 }
 
- 
+fn tape_io_types(tape: &Tape<TypeExpr, ExprGenerator>) -> Option<(Vec<TypeExpr>, Vec<TypeExpr>)> {
+    match tape {
+        Tape::Id(mono) => {
+            let atoms = monomial_atoms(mono);
+            Some((atoms_to_types(&atoms), atoms_to_types(&atoms)))
+        }
+        Tape::IdZero => Some((Vec::new(), Vec::new())),
+        Tape::EmbedCircuit(circuit) => circuit.io_types(),
+        Tape::Swap { left, right } => {
+            let left_atoms = monomial_atoms(left);
+            let right_atoms = monomial_atoms(right);
+            let mut inputs = atoms_to_types(&left_atoms);
+            inputs.extend(atoms_to_types(&right_atoms));
+            let mut outputs = atoms_to_types(&right_atoms);
+            outputs.extend(atoms_to_types(&left_atoms));
+            Some((inputs, outputs))
+        }
+        Tape::Seq(left, right) => {
+            let (left_in, left_out) = tape_io_types(left)?;
+            let (right_in, right_out) = tape_io_types(right)?;
+            if left_out != right_in {
+                return None;
+            }
+            Some((left_in, right_out))
+        }
+        Tape::Product(left, right) => {
+            let (left_in, left_out) = tape_io_types(left)?;
+            let (right_in, right_out) = tape_io_types(right)?;
+            let mut inputs = left_in;
+            inputs.extend(right_in);
+            let mut outputs = left_out;
+            outputs.extend(right_out);
+            Some((inputs, outputs))
+        }
+        Tape::Sum(left, right) => {
+            let left_types = tape_io_types(left)?;
+            let right_types = tape_io_types(right)?;
+            if left_types != right_types {
+                return None;
+            }
+            Some(left_types)
+        }
+        Tape::Discard(mono) => {
+            let atoms = monomial_atoms(mono);
+            Some((atoms_to_types(&atoms), Vec::new()))
+        }
+        Tape::Split(mono) => {
+            let atoms = monomial_atoms(mono);
+            Some((atoms_to_types(&atoms), atoms_to_types(&atoms)))
+        }
+        Tape::Create(mono) => {
+            let atoms = monomial_atoms(mono);
+            Some((Vec::new(), atoms_to_types(&atoms)))
+        }
+        Tape::Merge(mono) => {
+            let atoms = monomial_atoms(mono);
+            Some((atoms_to_types(&atoms), atoms_to_types(&atoms)))
+        }
+    }
+}
+
+fn atoms_to_types(atoms: &[Monomial<TypeExpr>]) -> Vec<TypeExpr> {
+    atoms
+        .iter()
+        .map(|mono| match mono {
+            Monomial::Atom(ty) => ty.clone(),
+            Monomial::One | Monomial::Product(_, _) => {
+                panic!("expected flat monomial atoms")
+            }
+        })
+        .collect()
+}

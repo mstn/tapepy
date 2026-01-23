@@ -97,12 +97,6 @@ impl CommandDerivationTree {
     }
 }
 
-pub fn infer_command_from_stmt(stmt: &Stmt) -> CommandDerivationTree {
-    let mut context = Context::default();
-    collect_free_vars_stmt(stmt, &mut context);
-    infer_command(stmt, &context).0
-}
-
 pub fn infer_command_from_suite(stmts: &[Stmt]) -> CommandDerivationTree {
     let mut context = Context::default();
     for stmt in stmts {
@@ -229,7 +223,10 @@ fn infer_block(stmts: &[Stmt], context: &Context) -> (CommandDerivationTree, Con
             "Seq",
             &next_context,
             format!("{}; ...", acc_tree.judgment.command),
-            vec![CommandChild::Command(acc_tree), CommandChild::Command(next_tree)],
+            vec![
+                CommandChild::Command(acc_tree),
+                CommandChild::Command(next_tree),
+            ],
             CommandForm::Seq,
         );
         acc_context = next_context;
