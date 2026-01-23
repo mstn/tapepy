@@ -1,30 +1,54 @@
 use tapepy::tape_language::circuit::Circuit;
+use tapepy::tape_language::{GeneratorShape, GeneratorTypes};
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct DummyGen;
+
+impl GeneratorShape for DummyGen {
+    fn arity(&self) -> usize {
+        0
+    }
+
+    fn coarity(&self) -> usize {
+        0
+    }
+}
+
+impl GeneratorTypes<char> for DummyGen {
+    fn input_types(&self) -> Option<Vec<char>> {
+        None
+    }
+
+    fn output_types(&self) -> Option<Vec<char>> {
+        None
+    }
+}
 
 #[test]
 fn id_empty_is_id_one() {
-    let circuit: Circuit<char, ()> = Circuit::id(Vec::new());
+    let circuit: Circuit<char, DummyGen> = Circuit::id(Vec::new());
     assert_eq!(circuit, Circuit::IdOne);
 }
 
 #[test]
 fn id_multiple_builds_products() {
-    let circuit: Circuit<char, ()> = Circuit::id(vec!['a', 'b']);
+    let circuit: Circuit<char, DummyGen> = Circuit::id(vec!['a', 'b']);
     let expected = Circuit::Product(Box::new(Circuit::Id('a')), Box::new(Circuit::Id('b')));
     assert_eq!(circuit, expected);
 }
 
 #[test]
 fn product_many_handles_empty_and_single() {
-    let empty: Circuit<char, ()> = Circuit::product_many(Vec::new());
+    let empty: Circuit<char, DummyGen> = Circuit::product_many(Vec::new());
     assert_eq!(empty, Circuit::IdOne);
 
-    let single: Circuit<char, ()> = Circuit::product_many(vec![Circuit::Id('x')]);
+    let single: Circuit<char, DummyGen> = Circuit::product_many(vec![Circuit::Id('x')]);
     assert_eq!(single, Circuit::Id('x'));
 }
 
 #[test]
 fn product_many_builds_nested_products() {
-    let circuit: Circuit<char, ()> = Circuit::product_many(vec![
+    let circuit: Circuit<char, DummyGen> = Circuit::product_many(vec![
         Circuit::Id('a'),
         Circuit::Id('b'),
         Circuit::Id('c'),
@@ -41,9 +65,9 @@ fn product_many_builds_nested_products() {
 
 #[test]
 fn copy_wire_n_times_handles_base_cases() {
-    let zero: Circuit<char, ()> = Circuit::copy_wire_n_times('a', 0);
-    let one: Circuit<char, ()> = Circuit::copy_wire_n_times('a', 1);
-    let two: Circuit<char, ()> = Circuit::copy_wire_n_times('a', 2);
+    let zero: Circuit<char, DummyGen> = Circuit::copy_wire_n_times('a', 0);
+    let one: Circuit<char, DummyGen> = Circuit::copy_wire_n_times('a', 1);
+    let two: Circuit<char, DummyGen> = Circuit::copy_wire_n_times('a', 2);
 
     assert_eq!(zero, Circuit::Discard('a'));
     assert_eq!(one, Circuit::Id('a'));
@@ -52,7 +76,7 @@ fn copy_wire_n_times_handles_base_cases() {
 
 #[test]
 fn copy_wire_n_times_expands_fanout() {
-    let circuit: Circuit<char, ()> = Circuit::copy_wire_n_times('a', 3);
+    let circuit: Circuit<char, DummyGen> = Circuit::copy_wire_n_times('a', 3);
     let expected = Circuit::Seq(
         Box::new(Circuit::Copy('a')),
         Box::new(Circuit::Product(
@@ -68,7 +92,7 @@ fn wiring_circuit_for_context_reorders_inputs() {
     let context_entries = vec![("x".to_string(), 'A'), ("y".to_string(), 'B')];
     let input_vars = vec!["y".to_string(), "x".to_string(), "x".to_string()];
 
-    let circuit: Circuit<char, ()> =
+    let circuit: Circuit<char, DummyGen> =
         Circuit::wiring_circuit_for_context(&context_entries, &input_vars);
 
     let grouped = Circuit::Product(Box::new(Circuit::Copy('A')), Box::new(Circuit::Id('B')));
@@ -103,7 +127,7 @@ fn wiring_circuit_for_context_empty_inputs_discards_all() {
     let context_entries = vec![("x".to_string(), 'A')];
     let input_vars: Vec<String> = Vec::new();
 
-    let circuit: Circuit<char, ()> =
+    let circuit: Circuit<char, DummyGen> =
         Circuit::wiring_circuit_for_context(&context_entries, &input_vars);
 
     assert_eq!(circuit, Circuit::Discard('A'));
@@ -111,7 +135,7 @@ fn wiring_circuit_for_context_empty_inputs_discards_all() {
 
 #[test]
 fn arity_reports_arity() {
-    let circuit: Circuit<char, ()> = Circuit::Seq(
+    let circuit: Circuit<char, DummyGen> = Circuit::Seq(
         Box::new(Circuit::Copy('a')),
         Box::new(Circuit::Join('a')),
     );
@@ -123,7 +147,7 @@ fn arity_reports_arity() {
 
 #[test]
 fn type_returns_inputs_and_outputs() {
-    let circuit: Circuit<char, ()> = Circuit::Product(
+    let circuit: Circuit<char, DummyGen> = Circuit::Product(
         Box::new(Circuit::Id('a')),
         Box::new(Circuit::Copy('b')),
     );
@@ -134,7 +158,7 @@ fn type_returns_inputs_and_outputs() {
 
 #[test]
 fn type_returns_none_on_mismatch() {
-    let circuit: Circuit<char, ()> = Circuit::Seq(
+    let circuit: Circuit<char, DummyGen> = Circuit::Seq(
         Box::new(Circuit::Id('a')),
         Box::new(Circuit::Id('b')),
     );
