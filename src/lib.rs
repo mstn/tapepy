@@ -1,5 +1,4 @@
 pub mod command_dot;
-pub mod command_edge;
 pub mod command_tape;
 pub mod command_typing;
 pub mod context;

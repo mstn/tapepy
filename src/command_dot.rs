@@ -11,9 +11,30 @@ use graphviz_rust::{
 use open_hypergraphs::lax::OpenHypergraph;
 use open_hypergraphs_dot::{Options, Theme};
 
-use crate::command_edge::CommandEdge;
 use crate::tape_language::{Monomial, TapeEdge};
 use crate::types::TypeExpr;
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum CommandEdge {
+    Atom(String),
+    Embedded(Box<OpenHypergraph<TypeExpr, CommandEdge>>),
+}
+
+impl std::fmt::Display for CommandEdge {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            CommandEdge::Atom(label) => write!(f, "{}", label),
+            CommandEdge::Embedded(child) => {
+                write!(
+                    f,
+                    "Embedded({}x{})",
+                    child.sources.len(),
+                    child.targets.len()
+                )
+            }
+        }
+    }
+}
 
 pub fn to_svg_with_clusters<O: Clone>(
     graph: &OpenHypergraph<O, CommandEdge>,

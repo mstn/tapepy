@@ -1,5 +1,4 @@
 mod command_dot;
-mod command_edge;
 mod command_tape;
 mod command_typing;
 mod context;
@@ -15,7 +14,7 @@ mod typing;
 use std::error::Error;
 
 use command_dot::{generate_dot_with_tape_clusters, to_svg_with_tape_clusters};
-use command_edge::CommandEdge;
+use command_dot::CommandEdge;
 use command_tape::tape_from_command;
 use command_typing::infer_command_from_suite;
 use graphviz_rust::printer::{DotPrinter, PrinterContext};
