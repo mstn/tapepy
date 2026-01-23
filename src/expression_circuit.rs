@@ -7,8 +7,6 @@ use crate::typing::{DeductionTree, ExprForm};
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ExprGenerator {
     pub name: String,
-    pub arity: usize,
-    pub coarity: usize,
     pub input_types: Option<Vec<TypeExpr>>,
     pub output_types: Option<Vec<TypeExpr>>,
 }
@@ -19,12 +17,8 @@ impl ExprGenerator {
         input_types: Vec<TypeExpr>,
         output_types: Vec<TypeExpr>,
     ) -> Self {
-        let arity = input_types.len();
-        let coarity = output_types.len();
         Self {
             name: name.into(),
-            arity,
-            coarity,
             input_types: Some(input_types),
             output_types: Some(output_types),
         }
@@ -39,11 +33,17 @@ impl fmt::Display for ExprGenerator {
 
 impl GeneratorShape for ExprGenerator {
     fn arity(&self) -> usize {
-        self.arity
+        self.input_types
+            .as_ref()
+            .map(|inputs| inputs.len())
+            .expect("ExprGenerator missing input types")
     }
 
     fn coarity(&self) -> usize {
-        self.coarity
+        self.output_types
+            .as_ref()
+            .map(|outputs| outputs.len())
+            .expect("ExprGenerator missing output types")
     }
 }
 

@@ -146,6 +146,22 @@ fn arity_reports_arity() {
 }
 
 #[test]
+fn arity_for_product_and_id_one() {
+    let circuit: Circuit<char, DummyGen> = Circuit::Product(
+        Box::new(Circuit::Id('a')),
+        Box::new(Circuit::Copy('b')),
+    );
+    let arity = circuit.arity();
+    assert_eq!(arity.inputs, 2);
+    assert_eq!(arity.outputs, 3);
+
+    let id_one: Circuit<char, DummyGen> = Circuit::IdOne;
+    let arity = id_one.arity();
+    assert_eq!(arity.inputs, 0);
+    assert_eq!(arity.outputs, 0);
+}
+
+#[test]
 fn type_returns_inputs_and_outputs() {
     let circuit: Circuit<char, DummyGen> = Circuit::Product(
         Box::new(Circuit::Id('a')),
@@ -163,4 +179,26 @@ fn type_returns_none_on_mismatch() {
         Box::new(Circuit::Id('b')),
     );
     assert!(circuit.io_types().is_none());
+}
+
+#[test]
+fn io_types_for_copy_and_discard() {
+    let copy: Circuit<char, DummyGen> = Circuit::Copy('x');
+    let discard: Circuit<char, DummyGen> = Circuit::Discard('y');
+
+    assert_eq!(copy.io_types().unwrap().0, vec!['x']);
+    assert_eq!(copy.io_types().unwrap().1, vec!['x', 'x']);
+    assert_eq!(discard.io_types().unwrap().0, vec!['y']);
+    assert!(discard.io_types().unwrap().1.is_empty());
+}
+
+#[test]
+fn io_types_for_swap() {
+    let swap: Circuit<char, DummyGen> = Circuit::Swap {
+        left: 'l',
+        right: 'r',
+    };
+    let ty = swap.io_types().unwrap();
+    assert_eq!(ty.0, vec!['l', 'r']);
+    assert_eq!(ty.1, vec!['r', 'l']);
 }
