@@ -12,9 +12,10 @@ mod types;
 mod typing;
 
 use std::error::Error;
+use std::path::PathBuf;
 
-use command_dot::{generate_dot_with_tape_clusters, to_svg_with_tape_clusters};
-use command_dot::CommandEdge;
+use clap::{Parser, ValueEnum};
+use command_dot::{generate_dot_with_tape_clusters, to_svg_with_tape_clusters, CommandEdge};
 use command_tape::tape_from_command;
 use command_typing::{collect_constraints, infer_command_from_suite};
 use graphviz_rust::printer::{DotPrinter, PrinterContext};
@@ -23,19 +24,69 @@ use open_hypergraphs_dot::Options;
 use program_tape::solve_and_strictify_program_tape;
 use rustpython_parser::{ast, Parse};
 
-fn main() -> Result<(), Box<dyn Error>> {
-    let input = std::env::args().skip(1).collect::<Vec<_>>().join(" ");
-    let source = if input.is_empty() {
-        "\nif x>0:\n  x = 1\nelse:\n  x = 2"
-    } else {
-        &input
-    };
+#[derive(Parser)]
+#[command(author, version, about = "Tapepy CLI")]
+struct Cli {
+    #[command(subcommand)]
+    command: Command,
+}
 
-    let suite = match ast::Suite::parse(source, "<input>") {
+#[derive(Parser)]
+enum Command {
+    /// Compile a source file into a tape hypergraph.
+    Compile {
+        /// Path to the source file.
+        filepath: PathBuf,
+        /// Source language (default: python).
+        #[arg(long, default_value = "python")]
+        language: String,
+        /// Output format.
+        #[arg(long, value_enum, default_value_t = OutputFormat::Svg)]
+        format: OutputFormat,
+        /// Output file path.
+        #[arg(long)]
+        output: PathBuf,
+        /// Strictify (solve types + substitute) before output.
+        #[arg(long)]
+        strictify: bool,
+    },
+}
+
+#[derive(ValueEnum, Clone, Copy)]
+enum OutputFormat {
+    Dot,
+    Svg,
+}
+
+fn main() -> Result<(), Box<dyn Error>> {
+    let cli = Cli::parse();
+    match cli.command {
+        Command::Compile {
+            filepath,
+            language,
+            format,
+            output,
+            strictify,
+        } => compile_file(&filepath, &language, format, &output, strictify),
+    }
+}
+
+fn compile_file(
+    filepath: &PathBuf,
+    language: &str,
+    format: OutputFormat,
+    output: &PathBuf,
+    strictify: bool,
+) -> Result<(), Box<dyn Error>> {
+    let source = std::fs::read_to_string(filepath)?;
+    if language.to_lowercase() != "python" {
+        return Err(format!("unsupported language `{}`", language).into());
+    }
+
+    let suite = match ast::Suite::parse(&source, filepath.to_string_lossy().as_ref()) {
         Ok(suite) => suite,
         Err(err) => {
-            eprintln!("Parse error: {}", err);
-            return Ok(());
+            return Err(format!("Parse error: {}", err).into());
         }
     };
 
@@ -48,45 +99,49 @@ fn main() -> Result<(), Box<dyn Error>> {
         types::TypeExpr::Var(types::TypeVar(id))
     });
 
+    let graph = if strictify {
+        let constraints = collect_constraints(&tree);
+        solve_and_strictify_program_tape(&term, constraints.constraints())
+    } else {
+        term
+    };
+
     let opts = Options {
         node_label: Box::new(|mono: &tape_language::Monomial<types::TypeExpr>| mono.to_string()),
         edge_label: Box::new(|e: &CommandEdge| e.to_string()),
         ..Options::default()
     };
 
-    write_svg_with_fallback("./out", &term, &opts)?;
-    let constraints = collect_constraints(&tree);
-    let strict_lax = solve_and_strictify_program_tape(&term, constraints.constraints());
-    write_svg_with_fallback("./out_strict", &strict_lax, &opts)?;
-
-    // Type solving is only available for graphs with TypeExpr node labels.
-    Ok(())
+    match format {
+        OutputFormat::Dot => write_dot(&graph, &opts, output),
+        OutputFormat::Svg => write_svg(&graph, &opts, output),
+    }
 }
 
-fn write_svg_with_fallback<E: Clone + std::fmt::Display>(
-    prefix: &str,
+fn write_dot<E: Clone + std::fmt::Display>(
     graph: &OpenHypergraph<
         tape_language::Monomial<types::TypeExpr>,
         tape_language::TapeEdge<types::TypeExpr, E>,
     >,
     opts: &Options<tape_language::Monomial<types::TypeExpr>, CommandEdge>,
+    output: &PathBuf,
 ) -> Result<(), Box<dyn Error>> {
-    let svg_path = format!("{}.svg", prefix);
-    let dot_path = format!("{}.dot", prefix);
     let dot_graph = generate_dot_with_tape_clusters(graph, opts);
     let mut ctx = PrinterContext::default();
     let dot_string = dot_graph.print(&mut ctx);
-    std::fs::write(&dot_path, dot_string)?;
-    match to_svg_with_tape_clusters(graph, opts) {
-        Ok(svg) => {
-            std::fs::write(svg_path, svg)?;
-        }
-        Err(err) => {
-            eprintln!(
-                "SVG rendering failed ({}). Wrote DOT output to {}.dot.",
-                err, prefix
-            );
-        }
-    }
+    std::fs::write(output, dot_string)?;
+    Ok(())
+}
+
+fn write_svg<E: Clone + std::fmt::Display>(
+    graph: &OpenHypergraph<
+        tape_language::Monomial<types::TypeExpr>,
+        tape_language::TapeEdge<types::TypeExpr, E>,
+    >,
+    opts: &Options<tape_language::Monomial<types::TypeExpr>, CommandEdge>,
+    output: &PathBuf,
+) -> Result<(), Box<dyn Error>> {
+    let svg = to_svg_with_tape_clusters(graph, opts)?;
+    std::fs::write(output, svg)?;
     Ok(())
 }

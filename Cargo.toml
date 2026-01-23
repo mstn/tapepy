@@ -4,6 +4,7 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
+clap = { version = "4.5.32", features = ["derive"] }
 graphviz-rust = "0.9.6"
 open-hypergraphs = "0.2.9"
 open-hypergraphs-dot = { version = "0.2.3", features = ["svg"] }
