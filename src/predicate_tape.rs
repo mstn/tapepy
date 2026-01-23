@@ -127,7 +127,7 @@ fn circuit_from_relation(
                 }
                 let copy = Circuit::wiring_circuit_for_context(context_entries, &input_vars);
                 let args_product = Circuit::product_many(arg_circuits);
-                Circuit::Seq(Box::new(copy), Box::new(args_product))
+                Circuit::seq(copy, args_product)
             }
         }
     };
@@ -136,6 +136,6 @@ fn circuit_from_relation(
         args.iter().map(|arg| arg.judgment().ty().clone()).collect(),
         negated,
     ));
-    let base = Circuit::Seq(Box::new(inputs), Box::new(op));
+    let base = Circuit::seq(inputs, op);
     base
 }

@@ -39,6 +39,22 @@ pub struct CircuitArity {
 }
 
 impl<S, G> Circuit<S, G> {
+    pub fn seq(left: Circuit<S, G>, right: Circuit<S, G>) -> Self {
+        match (left, right) {
+            (Circuit::IdOne, right) => right,
+            (left, Circuit::IdOne) => left,
+            (left, right) => Circuit::Seq(Box::new(left), Box::new(right)),
+        }
+    }
+
+    pub fn product(left: Circuit<S, G>, right: Circuit<S, G>) -> Self {
+        match (left, right) {
+            (Circuit::IdOne, right) => right,
+            (left, Circuit::IdOne) => left,
+            (left, right) => Circuit::Product(Box::new(left), Box::new(right)),
+        }
+    }
+
     pub fn id(terms: Vec<S>) -> Self {
         let circuits: Vec<Self> = terms.into_iter().map(Circuit::Id).collect();
         Circuit::product_many(circuits)
@@ -55,7 +71,7 @@ impl<S, G> Circuit<S, G> {
         let mut copies: Vec<Self> = terms.iter().cloned().map(Circuit::Copy).collect();
         let mut acc = copies.remove(0);
         for circuit in copies {
-            acc = Circuit::Product(Box::new(acc), Box::new(circuit));
+            acc = Circuit::product(acc, circuit);
         }
 
         if terms.len() == 1 {
@@ -76,7 +92,7 @@ impl<S, G> Circuit<S, G> {
         }
 
         let permute = Circuit::permute_circuit(&grouped_types, &Permutation(permutation));
-        Circuit::Seq(Box::new(acc), Box::new(permute))
+        Circuit::seq(acc, permute)
     }
 
     pub fn copy_wire_n_times(ty: S, count: usize) -> Self
@@ -91,8 +107,8 @@ impl<S, G> Circuit<S, G> {
                 // Expand fanout by one wire at a time.
                 let left = Circuit::Id(ty.clone());
                 let right = Circuit::copy_wire_n_times(ty.clone(), count - 1);
-                let prod = Circuit::Product(Box::new(left), Box::new(right));
-                Circuit::Seq(Box::new(Circuit::Copy(ty)), Box::new(prod))
+                let prod = Circuit::product(left, right);
+                Circuit::seq(Circuit::Copy(ty), prod)
             }
         }
     }
@@ -108,7 +124,7 @@ impl<S, G> Circuit<S, G> {
         let mut joins: Vec<Self> = terms.iter().cloned().map(Circuit::Join).collect();
         let mut acc = joins.remove(0);
         for circuit in joins {
-            acc = Circuit::Product(Box::new(acc), Box::new(circuit));
+            acc = Circuit::product(acc, circuit);
         }
 
         if terms.len() == 1 {
@@ -136,7 +152,7 @@ impl<S, G> Circuit<S, G> {
         }
 
         let permute = Circuit::permute_circuit(&interleaved_types, &Permutation(inverse));
-        Circuit::Seq(Box::new(permute), Box::new(acc))
+        Circuit::seq(permute, acc)
     }
 
     fn permute_circuit(types: &[S], permutation: &Permutation) -> Self
@@ -168,7 +184,7 @@ impl<S, G> Circuit<S, G> {
         swaps
             .into_iter()
             .fold(Circuit::id(types.to_vec()), |acc, swap| {
-                Circuit::Seq(Box::new(acc), Box::new(swap))
+                Circuit::seq(acc, swap)
             })
     }
 
@@ -178,7 +194,7 @@ impl<S, G> Circuit<S, G> {
         }
         let mut acc = circuits.remove(0);
         for circuit in circuits {
-            acc = Circuit::Product(Box::new(acc), Box::new(circuit));
+            acc = Circuit::product(acc, circuit);
         }
         acc
     }
@@ -208,7 +224,7 @@ impl<S, G> Circuit<S, G> {
             grouped
         } else {
             let perm = Circuit::permute_circuit(&grouped_types, &permutation);
-            Circuit::Seq(Box::new(grouped), Box::new(perm))
+            Circuit::seq(grouped, perm)
         }
     }
 }

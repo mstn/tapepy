@@ -139,13 +139,13 @@ pub fn circuit_from_expr(tree: &DeductionTree) -> Circuit<TypeExpr, ExprGenerato
                 vec![tree.children()[0].judgment().ty().clone()],
                 vec![tree.judgment().ty().clone()],
             ));
-            Circuit::Seq(Box::new(child), Box::new(gen))
+            Circuit::seq(child, gen)
         }
         ExprForm::BinOp(op) => {
             tree.assert_child_count(2, "BinOp");
             let left = circuit_from_expr(&tree.children()[0]);
             let right = circuit_from_expr(&tree.children()[1]);
-            let inputs = Circuit::Product(Box::new(left), Box::new(right));
+            let inputs = Circuit::product(left, right);
             let gen = Circuit::Generator(ExprGenerator::function(
                 op,
                 vec![
@@ -154,7 +154,7 @@ pub fn circuit_from_expr(tree: &DeductionTree) -> Circuit<TypeExpr, ExprGenerato
                 ],
                 vec![tree.judgment().ty().clone()],
             ));
-            Circuit::Seq(Box::new(inputs), Box::new(gen))
+            Circuit::seq(inputs, gen)
         }
         ExprForm::BoolOp(op) => {
             let inputs =
@@ -167,13 +167,13 @@ pub fn circuit_from_expr(tree: &DeductionTree) -> Circuit<TypeExpr, ExprGenerato
                     .collect(),
                 vec![tree.judgment().ty().clone()],
             ));
-            Circuit::Seq(Box::new(inputs), Box::new(gen))
+            Circuit::seq(inputs, gen)
         }
         ExprForm::Compare(op) => {
             tree.assert_child_count(2, "Compare");
             let left = circuit_from_expr(&tree.children()[0]);
             let right = circuit_from_expr(&tree.children()[1]);
-            let inputs = Circuit::Product(Box::new(left), Box::new(right));
+            let inputs = Circuit::product(left, right);
             let gen = Circuit::Generator(ExprGenerator::function(
                 op,
                 vec![
@@ -182,7 +182,7 @@ pub fn circuit_from_expr(tree: &DeductionTree) -> Circuit<TypeExpr, ExprGenerato
                 ],
                 vec![tree.judgment().ty().clone()],
             ));
-            Circuit::Seq(Box::new(inputs), Box::new(gen))
+            Circuit::seq(inputs, gen)
         }
         ExprForm::Call(name) => {
             if tree.children().is_empty() {
@@ -198,7 +198,7 @@ pub fn circuit_from_expr(tree: &DeductionTree) -> Circuit<TypeExpr, ExprGenerato
                     .collect(),
                 vec![tree.judgment().ty().clone()],
             ));
-            Circuit::Seq(Box::new(inputs), Box::new(gen))
+            Circuit::seq(inputs, gen)
         }
     }
 }
@@ -211,7 +211,7 @@ pub fn circuit_from_expr_with_context(
     // feed the resulting wires into the expression body.
     let wiring = wiring_circuit_for_expression(tree, context_entries);
     let expr = circuit_from_expr(tree);
-    Circuit::Seq(Box::new(wiring), Box::new(expr))
+    Circuit::seq(wiring, expr)
 }
 
 fn wiring_circuit_for_expression(

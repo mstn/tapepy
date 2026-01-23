@@ -21,7 +21,7 @@ pub fn tape_from_command(tree: &CommandDerivationTree) -> Tape<TypeExpr, ExprGen
             let right_tape = tape_from_command(right);
             match (left_tape.clone(), right_tape.clone()) {
                 (Tape::EmbedCircuit(circuit_left), Tape::EmbedCircuit(circuit_right)) => {
-                    Tape::EmbedCircuit(Box::new(Circuit::Seq(circuit_left, circuit_right)))
+                    Tape::EmbedCircuit(Box::new(Circuit::seq(*circuit_left, *circuit_right)))
                 }
                 _ => Tape::Seq(Box::new(left_tape), Box::new(right_tape)),
             }
@@ -60,20 +60,14 @@ fn assignment_tape(tree: &CommandDerivationTree, name: &str) -> Tape<TypeExpr, E
 
     let left_copy = Circuit::copy_wires(left_types);
     let right_copy = Circuit::copy_wires(right_types);
-    let split = Circuit::Product(
-        Box::new(left_copy),
-        Box::new(Circuit::Product(
-            Box::new(Circuit::Id(lhs_ty)),
-            Box::new(right_copy),
-        )),
+    let split = Circuit::product(
+        left_copy,
+        Circuit::product(Circuit::Id(lhs_ty), right_copy),
     );
 
-    let updated = Circuit::Product(
-        Box::new(left_id),
-        Box::new(Circuit::Product(Box::new(expr_circuit), Box::new(right_id))),
-    );
+    let updated = Circuit::product(left_id, Circuit::product(expr_circuit, right_id));
 
-    let assign = Circuit::Seq(Box::new(split), Box::new(updated));
+    let assign = Circuit::seq(split, updated);
 
     Tape::EmbedCircuit(Box::new(assign))
 }
