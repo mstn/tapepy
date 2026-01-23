@@ -309,12 +309,67 @@ fn three_assigns_embed_nested_seq_circuit() {
 #[test]
 fn nested_ifs_with_assignments_and_complex_conditions() {
     let (_tree, tape) = infer_tape(
-        "if x > 0:\n  if y > 0:\n    x = 1\n  else:\n    x = 2\nelse:\n  if y > 0:\n    x = 3\n  else:\n    x = 4",
+        "if x > y:\n  if x + y > 0:\n    x = y + 1\n  else:\n    x = x + y\nelse:\n  if y > x:\n    x = x + 2\n  else:\n    x = y + 3",
     );
 
     let x_ty = TypeExpr::Var(tapepy::types::TypeVar(0));
     let y_ty = TypeExpr::Var(tapepy::types::TypeVar(1));
+    let sum_xy_ty = TypeExpr::Var(tapepy::types::TypeVar(2));
+    let x_plus_y_ty = TypeExpr::Var(tapepy::types::TypeVar(3));
+    let y_plus_one_ty = TypeExpr::Int;
+    let x_plus_two_ty = TypeExpr::Int;
+    let y_plus_three_ty = TypeExpr::Int;
     let types = vec![x_ty.clone(), y_ty.clone()];
+
+    let y_plus_one = expr_with_context(
+        Circuit::product(Circuit::Discard(x_ty.clone()), Circuit::Id(y_ty.clone())),
+        expr_binop(
+            "+",
+            Circuit::Id(y_ty.clone()),
+            expr_const("1"),
+            y_ty.clone(),
+            TypeExpr::Int,
+            y_plus_one_ty.clone(),
+        ),
+    );
+    let x_plus_y = expr_with_context(
+        Circuit::product(Circuit::Id(x_ty.clone()), Circuit::Id(y_ty.clone())),
+        expr_binop(
+            "+",
+            Circuit::Id(x_ty.clone()),
+            Circuit::Id(y_ty.clone()),
+            x_ty.clone(),
+            y_ty.clone(),
+            x_plus_y_ty.clone(),
+        ),
+    );
+    let x_plus_two = expr_with_context(
+        Circuit::product(Circuit::Id(x_ty.clone()), Circuit::Discard(y_ty.clone())),
+        expr_binop(
+            "+",
+            Circuit::Id(x_ty.clone()),
+            expr_const("2"),
+            x_ty.clone(),
+            TypeExpr::Int,
+            x_plus_two_ty.clone(),
+        ),
+    );
+    let y_plus_three = expr_with_context(
+        Circuit::product(Circuit::Discard(x_ty.clone()), Circuit::Id(y_ty.clone())),
+        expr_binop(
+            "+",
+            Circuit::Id(y_ty.clone()),
+            expr_const("3"),
+            y_ty.clone(),
+            TypeExpr::Int,
+            y_plus_three_ty.clone(),
+        ),
+    );
+
+    let assign_y_plus_one = assign_circuit_x(&x_ty, &y_ty, y_plus_one);
+    let assign_x_plus_y = assign_circuit_x(&x_ty, &y_ty, x_plus_y);
+    let assign_x_plus_two = assign_circuit_x(&x_ty, &y_ty, x_plus_two);
+    let assign_y_plus_three = assign_circuit_x(&x_ty, &y_ty, y_plus_three);
 
     match tape {
         Tape::Seq(copy, tail) => {
@@ -327,18 +382,30 @@ fn nested_ifs_with_assignments_and_complex_conditions() {
                             assert_gate_tape(
                                 &left,
                                 &types,
-                                vec![x_ty.clone(), TypeExpr::Int],
+                                vec![x_ty.clone(), y_ty.clone()],
                                 false,
                             );
                             assert_gate_tape(
                                 &right,
                                 &types,
-                                vec![x_ty.clone(), TypeExpr::Int],
+                                vec![x_ty.clone(), y_ty.clone()],
                                 true,
                             );
 
-                            assert_nested_if_for_y(&left, &x_ty, &y_ty, "1", "2");
-                            assert_nested_if_for_y(&right, &x_ty, &y_ty, "3", "4");
+                            assert_nested_if(
+                                &left,
+                                &types,
+                                vec![sum_xy_ty.clone(), TypeExpr::Int],
+                                assign_y_plus_one,
+                                assign_x_plus_y,
+                            );
+                            assert_nested_if(
+                                &right,
+                                &types,
+                                vec![y_ty.clone(), x_ty.clone()],
+                                assign_x_plus_two,
+                                assign_y_plus_three,
+                            );
                         }
                         _ => panic!("expected sum of branches for outer if"),
                     }
@@ -422,12 +489,12 @@ fn assert_predicate_compare_tape(
     }
 }
 
-fn assert_nested_if_for_y(
+fn assert_nested_if(
     tape: &Tape<TypeExpr, ExprGenerator>,
-    x_ty: &TypeExpr,
-    y_ty: &TypeExpr,
-    then_label: &str,
-    else_label: &str,
+    context_types: &[TypeExpr],
+    pred_inputs: Vec<TypeExpr>,
+    then_assign: Circuit<TypeExpr, ExprGenerator>,
+    else_assign: Circuit<TypeExpr, ExprGenerator>,
 ) {
     let exec = match tape {
         Tape::Seq(_, prod) => match &**prod {
@@ -439,26 +506,26 @@ fn assert_nested_if_for_y(
 
     match &**exec {
         Tape::Seq(copy, tail) => {
-            assert_copy_wires_tape(copy, &[x_ty.clone(), y_ty.clone()]);
+            assert_copy_wires_tape(copy, context_types);
             match &**tail {
                 Tape::Seq(branches, join) => {
-                    assert_join_wires_tape(join, &[x_ty.clone(), y_ty.clone()]);
+                    assert_join_wires_tape(join, context_types);
                     match &**branches {
                         Tape::Sum(left, right) => {
                             assert_gate_tape(
                                 left,
-                                &[x_ty.clone(), y_ty.clone()],
-                                vec![y_ty.clone(), TypeExpr::Int],
+                                context_types,
+                                pred_inputs.clone(),
                                 false,
                             );
                             assert_gate_tape(
                                 right,
-                                &[x_ty.clone(), y_ty.clone()],
-                                vec![y_ty.clone(), TypeExpr::Int],
+                                context_types,
+                                pred_inputs,
                                 true,
                             );
-                            assert_assign_tape_x(left, x_ty, y_ty, then_label);
-                            assert_assign_tape_x(right, x_ty, y_ty, else_label);
+                            assert_assign_tape(left, &then_assign);
+                            assert_assign_tape(right, &else_assign);
                         }
                         _ => panic!("expected sum of branches in nested if"),
                     }
@@ -470,12 +537,7 @@ fn assert_nested_if_for_y(
     }
 }
 
-fn assert_assign_tape_x(
-    tape: &Tape<TypeExpr, ExprGenerator>,
-    x_ty: &TypeExpr,
-    y_ty: &TypeExpr,
-    label: &str,
-) {
+fn assert_assign_tape(tape: &Tape<TypeExpr, ExprGenerator>, expected: &Circuit<TypeExpr, ExprGenerator>) {
     let exec = match tape {
         Tape::Seq(_, prod) => match &**prod {
             Tape::Product(_, exec) => exec,
@@ -484,59 +546,52 @@ fn assert_assign_tape_x(
         _ => panic!("expected seq in gate tape for assignment"),
     };
     match &**exec {
-        Tape::EmbedCircuit(circuit) => assert_assign_circuit_x(circuit, x_ty, y_ty, label),
+        Tape::EmbedCircuit(circuit) => assert_eq!(**circuit, *expected),
         _ => panic!("expected embedded circuit for assignment"),
     }
 }
 
-fn assert_assign_circuit_x(
-    circuit: &Circuit<TypeExpr, ExprGenerator>,
+fn assign_circuit_x(
     x_ty: &TypeExpr,
     y_ty: &TypeExpr,
-    label: &str,
-) {
-    match circuit {
-        Circuit::Seq(split, updated) => {
-            match &**split {
-                Circuit::Product(left, right) => {
-                    assert_eq!(**left, Circuit::Id(x_ty.clone()));
-                    assert_eq!(**right, Circuit::Copy(y_ty.clone()));
-                }
-                _ => panic!("expected product in assignment split"),
-            }
-            match &**updated {
-                Circuit::Product(expr, right) => {
-                    assert_eq!(**right, Circuit::Id(y_ty.clone()));
-                    match &**expr {
-                        Circuit::Seq(wiring, gen) => {
-                            assert_eq!(
-                                **wiring,
-                                Circuit::product(
-                                    Circuit::Discard(x_ty.clone()),
-                                    Circuit::Discard(y_ty.clone())
-                                )
-                            );
-                            match &**gen {
-                                Circuit::Generator(ExprGenerator::Function {
-                                    name,
-                                    input_types,
-                                    output_types,
-                                }) => {
-                                    assert_eq!(name, label);
-                                    assert!(input_types.is_empty());
-                                    assert_eq!(*output_types, vec![TypeExpr::Int]);
-                                }
-                                _ => panic!("expected const generator in assignment"),
-                            }
-                        }
-                        _ => panic!("expected seq in assignment expr"),
-                    }
-                }
-                _ => panic!("expected product in assignment update"),
-            }
-        }
-        _ => panic!("expected seq in assignment circuit"),
-    }
+    expr_circuit: Circuit<TypeExpr, ExprGenerator>,
+) -> Circuit<TypeExpr, ExprGenerator> {
+    let split = Circuit::product(Circuit::Id(x_ty.clone()), Circuit::Copy(y_ty.clone()));
+    let updated = Circuit::product(expr_circuit, Circuit::Id(y_ty.clone()));
+    Circuit::seq(split, updated)
+}
+
+fn expr_const(label: &str) -> Circuit<TypeExpr, ExprGenerator> {
+    Circuit::Generator(ExprGenerator::Function {
+        name: label.to_string(),
+        input_types: Vec::new(),
+        output_types: vec![TypeExpr::Int],
+    })
+}
+
+fn expr_binop(
+    op: &str,
+    left: Circuit<TypeExpr, ExprGenerator>,
+    right: Circuit<TypeExpr, ExprGenerator>,
+    left_ty: TypeExpr,
+    right_ty: TypeExpr,
+    output_ty: TypeExpr,
+) -> Circuit<TypeExpr, ExprGenerator> {
+    Circuit::seq(
+        Circuit::product(left, right),
+        Circuit::Generator(ExprGenerator::Function {
+            name: op.to_string(),
+            input_types: vec![left_ty, right_ty],
+            output_types: vec![output_ty],
+        }),
+    )
+}
+
+fn expr_with_context(
+    wiring: Circuit<TypeExpr, ExprGenerator>,
+    expr: Circuit<TypeExpr, ExprGenerator>,
+) -> Circuit<TypeExpr, ExprGenerator> {
+    Circuit::seq(wiring, expr)
 }
 
 fn tape_io_types(tape: &Tape<TypeExpr, ExprGenerator>) -> Option<(Vec<TypeExpr>, Vec<TypeExpr>)> {

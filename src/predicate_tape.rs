@@ -56,9 +56,9 @@ pub fn tape_from_predicate_with_negation(
         }
         ExprForm::Call(name) => {
             // Predicate judgments are typed as Unit; the type checker already enforces Bool output.
-            if *tree.judgment().ty() != TypeExpr::Unit {
+            if *tree.judgment().ty() != TypeExpr::Bool {
                 panic!(
-                    "predicate call `{}` must be a Unit-typed predicate, got {}",
+                    "predicate call `{}` must be a Bool-typed predicate, got {}",
                     name,
                     tree.judgment().ty()
                 );
@@ -79,8 +79,8 @@ fn tape_from_relation(
     args: Vec<&DeductionTree>,
     negated: bool,
 ) -> Tape<TypeExpr, ExprGenerator> {
-    // Predicates are represented as relation generators returning Unit. This keeps predicate tapes
-    // in the tape language, and avoids treating them as ordinary boolean expressions.
+    // Predicates are represented as relation generators returning Bool, then discarded to Unit in
+    // the tape language. This avoids treating them as ordinary boolean expressions.
     let context_entries = if let Some(first) = args.first() {
         let expected = first.judgment().context().entries();
         for arg in &args {

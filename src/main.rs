@@ -16,7 +16,7 @@ use std::error::Error;
 use command_dot::{generate_dot_with_tape_clusters, to_svg_with_tape_clusters};
 use command_dot::CommandEdge;
 use command_tape::tape_from_command;
-use command_typing::infer_command_from_suite;
+use command_typing::{collect_constraints, infer_command_from_suite};
 use graphviz_rust::printer::{DotPrinter, PrinterContext};
 use open_hypergraphs::lax::OpenHypergraph;
 use open_hypergraphs_dot::Options;
@@ -55,7 +55,8 @@ fn main() -> Result<(), Box<dyn Error>> {
     };
 
     write_svg_with_fallback("./out", &term, &opts)?;
-    let strict_lax = solve_and_strictify_program_tape(&term);
+    let constraints = collect_constraints(&tree);
+    let strict_lax = solve_and_strictify_program_tape(&term, constraints.constraints());
     write_svg_with_fallback("./out_strict", &strict_lax, &opts)?;
 
     // Type solving is only available for graphs with TypeExpr node labels.

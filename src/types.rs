@@ -11,25 +11,16 @@ pub enum TypeExpr {
     Float,
     Named(String),
     Var(TypeVar),
-    Lub(Box<TypeExpr>, Box<TypeExpr>),
     Union(Box<TypeExpr>, Box<TypeExpr>),
 }
 
-impl TypeExpr {
-    pub fn lub(left: TypeExpr, right: TypeExpr) -> TypeExpr {
-        if left == right {
-            return left;
-        }
-
-        match (&left, &right) {
-            (TypeExpr::Bool, TypeExpr::Bool) => TypeExpr::Bool,
-            (TypeExpr::Unit, TypeExpr::Unit) => TypeExpr::Unit,
-            (TypeExpr::Int, TypeExpr::Float) | (TypeExpr::Float, TypeExpr::Int) => TypeExpr::Float,
-            (TypeExpr::Int, TypeExpr::Int) => TypeExpr::Int,
-            (TypeExpr::Float, TypeExpr::Float) => TypeExpr::Float,
-            _ => TypeExpr::Lub(Box::new(left), Box::new(right)),
-        }
-    }
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum TypeConstraint {
+    Equal(TypeExpr, TypeExpr),
+    Numeric(TypeExpr),
+    Iterable(TypeExpr),
+    Mapping(TypeExpr, TypeExpr),
+    Sequence(TypeExpr),
 }
 
 impl fmt::Display for TypeExpr {
@@ -38,11 +29,10 @@ impl fmt::Display for TypeExpr {
             TypeExpr::Bool => write!(f, "Bool"),
             TypeExpr::Unit => write!(f, "1"),
             TypeExpr::Int => write!(f, "Int"),
-            TypeExpr::Float => write!(f, "Float"),
-            TypeExpr::Named(name) => write!(f, "{}", name),
-            TypeExpr::Var(TypeVar(id)) => write!(f, "a{}", id),
-            TypeExpr::Lub(left, right) => write!(f, "lub({}, {})", left, right),
-            TypeExpr::Union(left, right) => write!(f, "union({}, {})", left, right),
-        }
+        TypeExpr::Float => write!(f, "Float"),
+        TypeExpr::Named(name) => write!(f, "{}", name),
+        TypeExpr::Var(TypeVar(id)) => write!(f, "a{}", id),
+        TypeExpr::Union(left, right) => write!(f, "union({}, {})", left, right),
     }
+}
 }

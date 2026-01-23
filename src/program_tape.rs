@@ -3,13 +3,15 @@ use open_hypergraphs::lax::OpenHypergraph;
 use crate::expression_circuit::ExprGenerator;
 use crate::solver::{apply_substitution, solve_type_equations, TypeSubstitution};
 use crate::tape_language::{Monomial, TapeEdge};
-use crate::types::TypeExpr;
+use crate::types::{TypeConstraint, TypeExpr};
 
 pub fn solve_and_strictify_program_tape(
     term: &OpenHypergraph<Monomial<TypeExpr>, TapeEdge<TypeExpr, ExprGenerator>>,
+    constraints: &[TypeConstraint],
 ) -> OpenHypergraph<Monomial<TypeExpr>, TapeEdge<TypeExpr, ExprGenerator>> {
-    let (nodes, constraints) = build_program_type_equations(term);
-    let subst = solve_type_equations(&nodes, &constraints)
+    let (nodes, mut equations) = build_program_type_equations(term);
+    equations.extend_from_slice(constraints);
+    let subst = solve_type_equations(&nodes, &equations)
         .unwrap_or_else(|err| panic!("type solving failed for program tape: {}", err));
     let solved = apply_substitution_to_tape(term, &subst);
     let strict_inner = solved.map_edges(|edge| strictify_tape_edge(&edge));
@@ -18,7 +20,7 @@ pub fn solve_and_strictify_program_tape(
 
 fn build_program_type_equations(
     term: &OpenHypergraph<Monomial<TypeExpr>, TapeEdge<TypeExpr, ExprGenerator>>,
-) -> (Vec<TypeExpr>, Vec<(TypeExpr, TypeExpr)>) {
+) -> (Vec<TypeExpr>, Vec<TypeConstraint>) {
     let mut nodes = Vec::new();
     let mut constraints = Vec::new();
 
@@ -60,7 +62,7 @@ fn monomial_atom_type(monomial: &Monomial<TypeExpr>) -> TypeExpr {
 fn collect_tape_constraints(
     term: &OpenHypergraph<Monomial<TypeExpr>, TapeEdge<TypeExpr, ExprGenerator>>,
     nodes: &mut Vec<TypeExpr>,
-    constraints: &mut Vec<(TypeExpr, TypeExpr)>,
+    constraints: &mut Vec<TypeConstraint>,
 ) {
     for mono in &term.hypergraph.nodes {
         nodes.push(monomial_atom_type(mono));
@@ -74,7 +76,7 @@ fn collect_tape_constraints(
     {
         let lhs = monomial_atom_type(&term.hypergraph.nodes[from.0]);
         let rhs = monomial_atom_type(&term.hypergraph.nodes[to.0]);
-        constraints.push((lhs, rhs));
+        constraints.push(TypeConstraint::Equal(lhs, rhs));
     }
 
     for (edge_idx, edge) in term.hypergraph.edges.iter().enumerate() {
@@ -91,19 +93,19 @@ fn collect_tape_constraints(
                 {
                     let lhs = child.hypergraph.nodes[from.0].clone();
                     let rhs = child.hypergraph.nodes[to.0].clone();
-                    constraints.push((lhs, rhs));
+                    constraints.push(TypeConstraint::Equal(lhs, rhs));
                 }
                 for (outer_node, &child_node) in outer_edge.sources.iter().zip(child.sources.iter())
                 {
                     let outer_ty = monomial_atom_type(&term.hypergraph.nodes[outer_node.0]);
                     let inner_ty = child.hypergraph.nodes[child_node.0].clone();
-                    constraints.push((outer_ty, inner_ty));
+                    constraints.push(TypeConstraint::Equal(outer_ty, inner_ty));
                 }
                 for (outer_node, &child_node) in outer_edge.targets.iter().zip(child.targets.iter())
                 {
                     let outer_ty = monomial_atom_type(&term.hypergraph.nodes[outer_node.0]);
                     let inner_ty = child.hypergraph.nodes[child_node.0].clone();
-                    constraints.push((outer_ty, inner_ty));
+                    constraints.push(TypeConstraint::Equal(outer_ty, inner_ty));
                 }
             }
             TapeEdge::Product(left, right) => {
@@ -118,27 +120,27 @@ fn collect_tape_constraints(
                 {
                     let outer_ty = monomial_atom_type(&term.hypergraph.nodes[outer_node.0]);
                     let inner_ty = monomial_atom_type(&left.hypergraph.nodes[child_node.0]);
-                    constraints.push((outer_ty, inner_ty));
+                    constraints.push(TypeConstraint::Equal(outer_ty, inner_ty));
                 }
                 for (outer_node, &child_node) in outer_left_targets.iter().zip(left.targets.iter())
                 {
                     let outer_ty = monomial_atom_type(&term.hypergraph.nodes[outer_node.0]);
                     let inner_ty = monomial_atom_type(&left.hypergraph.nodes[child_node.0]);
-                    constraints.push((outer_ty, inner_ty));
+                    constraints.push(TypeConstraint::Equal(outer_ty, inner_ty));
                 }
                 for (outer_node, &child_node) in
                     outer_right_sources.iter().zip(right.sources.iter())
                 {
                     let outer_ty = monomial_atom_type(&term.hypergraph.nodes[outer_node.0]);
                     let inner_ty = monomial_atom_type(&right.hypergraph.nodes[child_node.0]);
-                    constraints.push((outer_ty, inner_ty));
+                    constraints.push(TypeConstraint::Equal(outer_ty, inner_ty));
                 }
                 for (outer_node, &child_node) in
                     outer_right_targets.iter().zip(right.targets.iter())
                 {
                     let outer_ty = monomial_atom_type(&term.hypergraph.nodes[outer_node.0]);
                     let inner_ty = monomial_atom_type(&right.hypergraph.nodes[child_node.0]);
-                    constraints.push((outer_ty, inner_ty));
+                    constraints.push(TypeConstraint::Equal(outer_ty, inner_ty));
                 }
 
                 collect_tape_constraints(left, nodes, constraints);

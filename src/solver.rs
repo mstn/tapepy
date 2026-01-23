@@ -3,7 +3,7 @@ use std::fmt;
 
 use open_hypergraphs::lax::OpenHypergraph;
 
-use crate::types::{TypeExpr, TypeVar};
+use crate::types::{TypeConstraint, TypeExpr, TypeVar};
 
 #[derive(Debug, Clone)]
 pub struct TypeSubstitution {
@@ -23,11 +23,6 @@ impl TypeSubstitution {
                 .get(var)
                 .cloned()
                 .unwrap_or_else(|| TypeExpr::Var(var.clone())),
-            TypeExpr::Lub(left, right) => {
-                let lhs = self.apply(left);
-                let rhs = self.apply(right);
-                TypeExpr::lub(lhs, rhs)
-            }
             TypeExpr::Union(left, right) => {
                 let lhs = self.apply(left);
                 let rhs = self.apply(right);
@@ -85,15 +80,28 @@ pub fn solve_hypergraph_types<A: Clone>(
 
 pub fn solve_type_equations(
     nodes: &[TypeExpr],
-    constraints: &[(TypeExpr, TypeExpr)],
+    constraints: &[TypeConstraint],
 ) -> Result<TypeSubstitution, SolveError> {
     let mut vars = HashSet::new();
     for expr in nodes {
         collect_vars_expr(expr, &mut vars);
     }
-    for (lhs, rhs) in constraints {
-        collect_vars_expr(lhs, &mut vars);
-        collect_vars_expr(rhs, &mut vars);
+    for constraint in constraints {
+        match constraint {
+            TypeConstraint::Equal(lhs, rhs) => {
+                collect_vars_expr(lhs, &mut vars);
+                collect_vars_expr(rhs, &mut vars);
+            }
+            TypeConstraint::Numeric(expr)
+            | TypeConstraint::Iterable(expr)
+            | TypeConstraint::Sequence(expr) => {
+                collect_vars_expr(expr, &mut vars);
+            }
+            TypeConstraint::Mapping(key, value) => {
+                collect_vars_expr(key, &mut vars);
+                collect_vars_expr(value, &mut vars);
+            }
+        }
     }
     let vars_list: Vec<TypeVar> = vars.into_iter().collect();
 
@@ -107,9 +115,22 @@ pub fn solve_type_equations(
     for expr in nodes {
         collect_named_expr(expr, &mut named);
     }
-    for (lhs, rhs) in constraints {
-        collect_named_expr(lhs, &mut named);
-        collect_named_expr(rhs, &mut named);
+    for constraint in constraints {
+        match constraint {
+            TypeConstraint::Equal(lhs, rhs) => {
+                collect_named_expr(lhs, &mut named);
+                collect_named_expr(rhs, &mut named);
+            }
+            TypeConstraint::Numeric(expr)
+            | TypeConstraint::Iterable(expr)
+            | TypeConstraint::Sequence(expr) => {
+                collect_named_expr(expr, &mut named);
+            }
+            TypeConstraint::Mapping(key, value) => {
+                collect_named_expr(key, &mut named);
+                collect_named_expr(value, &mut named);
+            }
+        }
     }
     for name in named {
         choices.push(TypeExpr::Named(name));
@@ -156,10 +177,6 @@ fn collect_vars_expr(expr: &TypeExpr, vars: &mut HashSet<TypeVar>) {
         TypeExpr::Var(var) => {
             vars.insert(var.clone());
         }
-        TypeExpr::Lub(left, right) => {
-            collect_vars_expr(left, vars);
-            collect_vars_expr(right, vars);
-        }
         TypeExpr::Union(left, right) => {
             collect_vars_expr(left, vars);
             collect_vars_expr(right, vars);
@@ -167,7 +184,7 @@ fn collect_vars_expr(expr: &TypeExpr, vars: &mut HashSet<TypeVar>) {
     }
 }
 
-fn collect_constraints<A>(graph: &OpenHypergraph<TypeExpr, A>) -> Vec<(TypeExpr, TypeExpr)> {
+fn collect_constraints<A>(graph: &OpenHypergraph<TypeExpr, A>) -> Vec<TypeConstraint> {
     let mut constraints = Vec::new();
     for (from, to) in graph
         .hypergraph
@@ -178,7 +195,7 @@ fn collect_constraints<A>(graph: &OpenHypergraph<TypeExpr, A>) -> Vec<(TypeExpr,
     {
         let lhs = graph.hypergraph.nodes[from.0].clone();
         let rhs = graph.hypergraph.nodes[to.0].clone();
-        constraints.push((lhs, rhs));
+        constraints.push(TypeConstraint::Equal(lhs, rhs));
     }
     constraints
 }
@@ -205,7 +222,7 @@ fn collect_named_expr(expr: &TypeExpr, names: &mut HashSet<String>) {
         TypeExpr::Named(name) => {
             names.insert(name.clone());
         }
-        TypeExpr::Lub(left, right) | TypeExpr::Union(left, right) => {
+        TypeExpr::Union(left, right) => {
             collect_named_expr(left, names);
             collect_named_expr(right, names);
         }
@@ -217,15 +234,12 @@ fn backtrack_solve<A>(
     vars: &[TypeVar],
     idx: usize,
     assignment: &mut HashMap<TypeVar, TypeExpr>,
-    constraints: &[(TypeExpr, TypeExpr)],
+    constraints: &[TypeConstraint],
     graph: &OpenHypergraph<TypeExpr, A>,
     choices: &[TypeExpr],
 ) -> bool {
     if idx == vars.len() {
-        let constraints_ok = constraints
-            .iter()
-            .all(|(lhs, rhs)| eval_expr(lhs, assignment) == eval_expr(rhs, assignment));
-        if !constraints_ok {
+        if !constraints_satisfied(constraints, assignment) {
             return false;
         }
         return primitives_ok(graph, assignment);
@@ -250,11 +264,6 @@ fn eval_expr(expr: &TypeExpr, assignment: &HashMap<TypeVar, TypeExpr>) -> TypeEx
         TypeExpr::Float => TypeExpr::Float,
         TypeExpr::Named(name) => TypeExpr::Named(name.clone()),
         TypeExpr::Var(var) => assignment.get(var).cloned().unwrap_or(TypeExpr::Int),
-        TypeExpr::Lub(left, right) => {
-            let lhs = eval_expr(left, assignment);
-            let rhs = eval_expr(right, assignment);
-            TypeExpr::lub(lhs, rhs)
-        }
         TypeExpr::Union(left, right) => {
             let lhs = eval_expr(left, assignment);
             let rhs = eval_expr(right, assignment);
@@ -278,4 +287,29 @@ fn primitives_ok<A>(
             TypeExpr::Bool | TypeExpr::Unit | TypeExpr::Int | TypeExpr::Float | TypeExpr::Named(_)
         )
     })
+}
+
+fn constraints_satisfied(
+    constraints: &[TypeConstraint],
+    assignment: &HashMap<TypeVar, TypeExpr>,
+) -> bool {
+    for constraint in constraints {
+        match constraint {
+            TypeConstraint::Equal(lhs, rhs) => {
+                if eval_expr(lhs, assignment) != eval_expr(rhs, assignment) {
+                    return false;
+                }
+            }
+            TypeConstraint::Numeric(expr) => {
+                let resolved = eval_expr(expr, assignment);
+                if !matches!(resolved, TypeExpr::Int | TypeExpr::Float) {
+                    return false;
+                }
+            }
+            TypeConstraint::Iterable(_) | TypeConstraint::Sequence(_) | TypeConstraint::Mapping(_, _) => {
+                // Keep these permissive for now; they can be enforced once richer types are modeled.
+            }
+        }
+    }
+    true
 }

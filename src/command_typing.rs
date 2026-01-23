@@ -5,7 +5,8 @@ use rustpython_parser::ast::{Expr, ExprName, Stmt, StmtAssign, StmtIf, StmtWhile
 use crate::context::Context;
 use crate::types::TypeExpr;
 use crate::typing::{
-    infer_expression_in_context, infer_predicate_in_context, ContextSnapshot, DeductionTree,
+    infer_expression_in_context, infer_predicate_in_context, reset_fresh_type_vars,
+    ConstraintStore, ContextSnapshot, DeductionTree,
 };
 
 #[derive(Debug, Clone)]
@@ -97,11 +98,29 @@ impl CommandDerivationTree {
     }
 }
 
+pub fn collect_constraints(tree: &CommandDerivationTree) -> ConstraintStore {
+    let mut store = ConstraintStore::default();
+    collect_constraints_inner(tree, &mut store);
+    store
+}
+
+fn collect_constraints_inner(tree: &CommandDerivationTree, store: &mut ConstraintStore) {
+    for child in &tree.children {
+        match child {
+            CommandChild::Command(cmd) => collect_constraints_inner(cmd, store),
+            CommandChild::Predicate(pred) | CommandChild::Expression(pred) => {
+                store.extend(pred.constraints());
+            }
+        }
+    }
+}
+
 pub fn infer_command_from_suite(stmts: &[Stmt]) -> CommandDerivationTree {
     let mut context = Context::default();
     for stmt in stmts {
         collect_free_vars_stmt(stmt, &mut context);
     }
+    reset_fresh_type_vars(context.entries().len());
     infer_block(stmts, &context).0
 }
 
@@ -155,8 +174,8 @@ fn infer_assign(assign: &StmtAssign, context: &Context) -> (CommandDerivationTre
 
 fn infer_if(if_stmt: &StmtIf, context: &Context) -> (CommandDerivationTree, Context) {
     let pred_tree = infer_predicate_in_context(&if_stmt.test, context);
-    if pred_tree.judgment().ty() != &TypeExpr::Unit {
-        panic!("type error: if predicate must have type 1");
+    if pred_tree.judgment().ty() != &TypeExpr::Bool {
+        panic!("type error: if predicate must have type Bool");
     }
 
     let (then_tree, then_context) = infer_block(&if_stmt.body, context);
@@ -181,8 +200,8 @@ fn infer_if(if_stmt: &StmtIf, context: &Context) -> (CommandDerivationTree, Cont
 
 fn infer_while(while_stmt: &StmtWhile, context: &Context) -> (CommandDerivationTree, Context) {
     let pred_tree = infer_predicate_in_context(&while_stmt.test, context);
-    if pred_tree.judgment().ty() != &TypeExpr::Unit {
-        panic!("type error: while predicate must have type 1");
+    if pred_tree.judgment().ty() != &TypeExpr::Bool {
+        panic!("type error: while predicate must have type Bool");
     }
 
     let (body_tree, body_context) = infer_block(&while_stmt.body, context);

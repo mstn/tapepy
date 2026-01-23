@@ -1039,7 +1039,6 @@ fn generate_edge_clusters<O: Clone>(
             CommandEdge::Embedded(child) => {
                 let child_opts = child_opts_from_parent(opts);
                 let cluster_id = format!("cluster_{}e_{}", prefix, edge_idx);
-                let cluster_id_for_edges = cluster_id.clone();
                 let mut cluster = Subgraph {
                     id: Id::Plain(cluster_id),
                     stmts: vec![
