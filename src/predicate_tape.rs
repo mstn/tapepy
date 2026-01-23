@@ -55,9 +55,10 @@ pub fn tape_from_predicate_with_negation(
             tape_from_predicate_with_negation(child, !negated)
         }
         ExprForm::Call(name) => {
-            if *tree.judgment().ty() != TypeExpr::Bool {
+            // Predicate judgments are typed as Unit; the type checker already enforces Bool output.
+            if *tree.judgment().ty() != TypeExpr::Unit {
                 panic!(
-                    "predicate call `{}` must return Bool, got {}",
+                    "predicate call `{}` must be a Unit-typed predicate, got {}",
                     name,
                     tree.judgment().ty()
                 );
