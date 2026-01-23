@@ -699,6 +699,21 @@ pub fn product_many<S, G>(mut circuits: Vec<Circuit<S, G>>) -> Circuit<S, G> {
     acc
 }
 
+pub fn copy_many<S: Clone, G>(ty: S, count: usize) -> Circuit<S, G> {
+    match count {
+        0 => Circuit::Discard(ty),
+        1 => Circuit::Id(ty),
+        2 => Circuit::Copy(ty),
+        _ => {
+            // Expand fanout by one wire at a time.
+            let left = Circuit::Id(ty.clone());
+            let right = copy_many(ty.clone(), count - 1);
+            let prod = Circuit::Product(Box::new(left), Box::new(right));
+            Circuit::Seq(Box::new(Circuit::Copy(ty)), Box::new(prod))
+        }
+    }
+}
+
 fn swap_adjacent<S: Clone, G>(types: &[S], index: usize) -> Circuit<S, G> {
     let left = identity_for_types(&types[..index]);
     let mid = Circuit::Swap {

@@ -1,6 +1,8 @@
 use std::fmt;
 
-use crate::tape_language::{product_many, Circuit, GeneratorShape, GeneratorTypes, Monomial};
+use crate::tape_language::{
+    copy_many, product_many, Circuit, GeneratorShape, GeneratorTypes, Monomial,
+};
 use crate::types::TypeExpr;
 use crate::typing::{DeductionTree, ExprForm};
 
@@ -175,7 +177,7 @@ fn wiring_circuit_for_expression(
     // For each context entry, build the required fanout (or discard) circuit.
     let mut var_circuits = Vec::with_capacity(context_entries.len());
     for ((_, ty), count) in context_entries.iter().zip(counts.iter().copied()) {
-        var_circuits.push(copy_n(ty.clone(), count));
+        var_circuits.push(copy_many(ty.clone(), count));
     }
     let grouped = product_many(var_circuits);
 
@@ -225,21 +227,6 @@ fn permutation_for_inputs(
         permutation.push(use_idx);
     }
     Permutation(permutation)
-}
-
-fn copy_n(ty: TypeExpr, count: usize) -> Circuit<TypeExpr, ExprGenerator> {
-    match count {
-        0 => Circuit::Discard(ty),
-        1 => Circuit::Id(ty),
-        2 => Circuit::Copy(ty),
-        _ => {
-            // Expand fanout by one wire at a time.
-            let left = Circuit::Id(ty.clone());
-            let right = copy_n(ty.clone(), count - 1);
-            let prod = Circuit::Product(Box::new(left), Box::new(right));
-            Circuit::Seq(Box::new(Circuit::Copy(ty)), Box::new(prod))
-        }
-    }
 }
 
 fn permute_circuit(
