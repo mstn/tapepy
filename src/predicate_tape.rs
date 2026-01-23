@@ -27,7 +27,7 @@ pub fn tape_from_predicate_with_negation(
         },
         ExprForm::BoolOp(op) => match (op.as_str(), negated) {
             ("and", false) | ("or", true) => {
-                assert_child_count(tree, 2, op.as_str());
+                tree.assert_child_count(2, op.as_str());
                 let left = tape_from_predicate_with_negation(&tree.children()[0], negated);
                 let right = tape_from_predicate_with_negation(&tree.children()[1], negated);
                 let copy = Tape::Split(context_monomial(tree));
@@ -35,7 +35,7 @@ pub fn tape_from_predicate_with_negation(
                 Tape::Seq(Box::new(copy), Box::new(tensor))
             }
             ("or", false) | ("and", true) => {
-                assert_child_count(tree, 2, op.as_str());
+                tree.assert_child_count(2, op.as_str());
                 let left = tape_from_predicate_with_negation(&tree.children()[0], negated);
                 let right = tape_from_predicate_with_negation(&tree.children()[1], negated);
                 let copy = Tape::Split(context_monomial(tree));
@@ -68,7 +68,7 @@ struct Relation<'a> {
 fn predicate_relation(tree: &DeductionTree) -> Relation<'_> {
     match tree.form() {
         ExprForm::UnaryOp(op) if op == "not" => {
-            assert_child_count(tree, 1, "not");
+            tree.assert_child_count(1, "not");
             predicate_relation(&tree.children()[0])
         }
         ExprForm::Call(name) => Relation {
@@ -147,11 +147,4 @@ fn context_monomial_from_entries(entries: &[(String, TypeExpr)]) -> Monomial<Typ
     entries.iter().fold(Monomial::one(), |acc, (_, ty)| {
         Monomial::product(acc, Monomial::atom(ty.clone()))
     })
-}
-
-fn assert_child_count(tree: &DeductionTree, expected: usize, label: &str) {
-    let actual = tree.children().len();
-    if actual != expected {
-        panic!("{} expects {} children, got {}", label, expected, actual);
-    }
 }
