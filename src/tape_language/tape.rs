@@ -61,6 +61,14 @@ impl TapeArity {
 }
 
 impl<S, G: GeneratorShape> Tape<S, G> {
+    pub fn copy_wires(monomial: Monomial<S>) -> Tape<S, G>
+    where
+        S: Clone,
+    {
+        let atoms = monomial_atom_sorts(&monomial);
+        Tape::EmbedCircuit(Box::new(Circuit::copy_wires(atoms)))
+    }
+
     pub fn arity(&self) -> TapeArity {
         match self {
             Tape::Id(mono) => {
@@ -258,6 +266,18 @@ fn monomial_atoms<S: Clone>(monomial: &Monomial<S>) -> Vec<Monomial<S>> {
             atoms
         }
     }
+}
+
+fn monomial_atom_sorts<S: Clone>(monomial: &Monomial<S>) -> Vec<S> {
+    monomial_atoms(monomial)
+        .into_iter()
+        .map(|atom| match atom {
+            Monomial::Atom(sort) => sort,
+            Monomial::One | Monomial::Product(_, _) => {
+                panic!("expected monomial atoms from monomial_atoms")
+            }
+        })
+        .collect()
 }
 
 fn add_nodes<S: Clone, G>(

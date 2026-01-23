@@ -30,17 +30,19 @@ pub fn tape_from_predicate_with_negation(
                 tree.assert_child_count(2, op.as_str());
                 let left = tape_from_predicate_with_negation(&tree.children()[0], negated);
                 let right = tape_from_predicate_with_negation(&tree.children()[1], negated);
-                let copy = Tape::Split(monomial_from_entries(&tree.judgment().context().entries()));
-                let tensor = Tape::Sum(Box::new(left), Box::new(right));
+                let copy =
+                    Tape::copy_wires(monomial_from_entries(&tree.judgment().context().entries()));
+                let tensor = Tape::Product(Box::new(left), Box::new(right));
                 Tape::Seq(Box::new(copy), Box::new(tensor))
             }
             ("or", false) | ("and", true) => {
                 tree.assert_child_count(2, op.as_str());
                 let left = tape_from_predicate_with_negation(&tree.children()[0], negated);
                 let right = tape_from_predicate_with_negation(&tree.children()[1], negated);
-                let copy = Tape::Split(monomial_from_entries(&tree.judgment().context().entries()));
+                let split =
+                    Tape::Split(monomial_from_entries(&tree.judgment().context().entries()));
                 let tensor = Tape::Sum(Box::new(left), Box::new(right));
-                let merged = Tape::Seq(Box::new(copy), Box::new(tensor));
+                let merged = Tape::Seq(Box::new(split), Box::new(tensor));
                 Tape::Seq(Box::new(merged), Box::new(Tape::Merge(Monomial::one())))
             }
             _ => panic!("unsupported predicate boolop `{}`", op),
@@ -52,34 +54,15 @@ pub fn tape_from_predicate_with_negation(
                 .unwrap_or_else(|| panic!("not expects a child"));
             tape_from_predicate_with_negation(child, !negated)
         }
-        ExprForm::Call(_) | ExprForm::Compare(_) => {
-            let relation = predicate_relation(tree);
-            tape_from_relation(relation.name, relation.args, negated)
+        ExprForm::Call(name) => {
+            let args = tree.children().iter().collect();
+            tape_from_relation(name.clone(), args, negated)
+        }
+        ExprForm::Compare(op) => {
+            let args = tree.children().iter().collect();
+            tape_from_relation(op.clone(), args, negated)
         }
         _ => panic!("unsupported predicate form {:?}", tree.form()),
-    }
-}
-
-struct Relation<'a> {
-    name: String,
-    args: Vec<&'a DeductionTree>,
-}
-
-fn predicate_relation(tree: &DeductionTree) -> Relation<'_> {
-    match tree.form() {
-        ExprForm::UnaryOp(op) if op == "not" => {
-            tree.assert_child_count(1, "not");
-            predicate_relation(&tree.children()[0])
-        }
-        ExprForm::Call(name) => Relation {
-            name: name.clone(),
-            args: tree.children().iter().collect(),
-        },
-        ExprForm::Compare(op) => Relation {
-            name: op.clone(),
-            args: tree.children().iter().collect(),
-        },
-        _ => panic!("predicate relation expects a call or comparison"),
     }
 }
 
@@ -140,5 +123,3 @@ fn circuit_from_relation(
     let base = Circuit::Seq(Box::new(inputs), Box::new(op));
     base
 }
-
- 
