@@ -55,6 +55,13 @@ pub fn tape_from_predicate_with_negation(
             tape_from_predicate_with_negation(child, !negated)
         }
         ExprForm::Call(name) => {
+            if *tree.judgment().ty() != TypeExpr::Bool {
+                panic!(
+                    "predicate call `{}` must return Bool, got {}",
+                    name,
+                    tree.judgment().ty()
+                );
+            }
             let args = tree.children().iter().collect();
             tape_from_relation(name.clone(), args, negated)
         }
@@ -71,6 +78,8 @@ fn tape_from_relation(
     args: Vec<&DeductionTree>,
     negated: bool,
 ) -> Tape<TypeExpr, ExprGenerator> {
+    // Predicates are represented as relation generators returning Unit. This keeps predicate tapes
+    // in the tape language, and avoids treating them as ordinary boolean expressions.
     let context_entries = if let Some(first) = args.first() {
         let expected = first.judgment().context().entries();
         for arg in &args {
@@ -94,22 +103,35 @@ fn circuit_from_relation(
     context_entries: &[(String, TypeExpr)],
     negated: bool,
 ) -> Circuit<TypeExpr, ExprGenerator> {
-    let context_types: Vec<TypeExpr> = context_entries.iter().map(|(_, ty)| ty.clone()).collect();
+    // Build the relation circuit by wiring argument expressions from the shared context, then
+    // sequencing into a relation generator (named by the predicate) that outputs Unit.
     let inputs = match args.len() {
         0 => Circuit::IdOne,
-        1 => circuit_from_expr_with_context(args[0], context_entries),
-        2 => {
-            let left = circuit_from_expr_with_context(args[0], context_entries);
-            let right = circuit_from_expr_with_context(args[1], context_entries);
-            let copy = Circuit::copy_wires(context_types);
-            let pair = Circuit::Product(Box::new(left), Box::new(right));
-            Circuit::Seq(Box::new(copy), Box::new(pair))
-        }
         _ => {
-            panic!("predicate relations with more than 2 arguments are not supported");
+            let arg_circuits: Vec<_> = args
+                .iter()
+                .map(|arg| circuit_from_expr_with_context(arg, context_entries))
+                .collect();
+            if arg_circuits.len() == 1 {
+                arg_circuits
+                    .into_iter()
+                    .next()
+                    .expect("single argument circuit missing")
+            } else {
+                let mut input_vars = Vec::with_capacity(context_entries.len() * arg_circuits.len());
+                for _ in 0..arg_circuits.len() {
+                    for (name, _) in context_entries {
+                        input_vars.push(name.clone());
+                    }
+                }
+                let copy = Circuit::wiring_circuit_for_context(context_entries, &input_vars);
+                let args_product = Circuit::product_many(arg_circuits);
+                Circuit::Seq(Box::new(copy), Box::new(args_product))
+            }
         }
     };
     let rel_name = if negated {
+        // Encode negation by renaming the relation; no boolean algebra is applied here.
         format!("not {}", name)
     } else {
         name
