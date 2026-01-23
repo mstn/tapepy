@@ -44,13 +44,13 @@ impl CircuitArity {
     }
 }
 
-impl<S, G: GeneratorShape> Circuit<S, G> {
+impl<S, G> Circuit<S, G> {
     pub fn id(terms: Vec<S>) -> Self {
-        let mut circuits: Vec<Self> = terms.into_iter().map(Circuit::Id).collect();
+        let circuits: Vec<Self> = terms.into_iter().map(Circuit::Id).collect();
         product_many(circuits)
     }
 
-    pub fn copy_n(terms: Vec<S>) -> Self
+    pub fn copy_wires(terms: Vec<S>) -> Self
     where
         S: Clone,
     {
@@ -83,6 +83,24 @@ impl<S, G: GeneratorShape> Circuit<S, G> {
 
         let permute = permute_circuit(&grouped_types, &Permutation(permutation));
         Circuit::Seq(Box::new(acc), Box::new(permute))
+    }
+
+    pub fn copy_wire_n_times(ty: S, count: usize) -> Self
+    where
+        S: Clone,
+    {
+        match count {
+            0 => Circuit::Discard(ty),
+            1 => Circuit::Id(ty),
+            2 => Circuit::Copy(ty),
+            _ => {
+                // Expand fanout by one wire at a time.
+                let left = Circuit::Id(ty.clone());
+                let right = Circuit::copy_wire_n_times(ty.clone(), count - 1);
+                let prod = Circuit::Product(Box::new(left), Box::new(right));
+                Circuit::Seq(Box::new(Circuit::Copy(ty)), Box::new(prod))
+            }
+        }
     }
 
     pub fn join_n(terms: Vec<S>) -> Self
@@ -126,7 +144,9 @@ impl<S, G: GeneratorShape> Circuit<S, G> {
         let permute = permute_circuit(&interleaved_types, &Permutation(inverse));
         Circuit::Seq(Box::new(permute), Box::new(acc))
     }
+}
 
+impl<S, G: GeneratorShape> Circuit<S, G> {
     pub fn typing(&self) -> CircuitArity {
         match self {
             Circuit::Id(_) => CircuitArity::new(1, 1),
@@ -319,21 +339,6 @@ pub fn product_many<S, G>(mut circuits: Vec<Circuit<S, G>>) -> Circuit<S, G> {
     acc
 }
 
-pub fn copy_many<S: Clone, G>(ty: S, count: usize) -> Circuit<S, G> {
-    match count {
-        0 => Circuit::Discard(ty),
-        1 => Circuit::Id(ty),
-        2 => Circuit::Copy(ty),
-        _ => {
-            // Expand fanout by one wire at a time.
-            let left = Circuit::Id(ty.clone());
-            let right = copy_many(ty.clone(), count - 1);
-            let prod = Circuit::Product(Box::new(left), Box::new(right));
-            Circuit::Seq(Box::new(Circuit::Copy(ty)), Box::new(prod))
-        }
-    }
-}
-
 pub fn wiring_circuit_for_context<S: Clone, G>(
     context_entries: &[(String, S)],
     input_vars: &[String],
@@ -346,7 +351,7 @@ pub fn wiring_circuit_for_context<S: Clone, G>(
 
     let mut var_circuits = Vec::with_capacity(context_entries.len());
     for ((_, ty), count) in context_entries.iter().zip(counts.iter().copied()) {
-        var_circuits.push(copy_many(ty.clone(), count));
+        var_circuits.push(Circuit::copy_wire_n_times(ty.clone(), count));
     }
     let grouped = product_many(var_circuits);
 

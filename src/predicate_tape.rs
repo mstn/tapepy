@@ -109,7 +109,7 @@ fn circuit_from_relation(
         2 => {
             let left = circuit_from_expr_with_context(args[0], context_entries);
             let right = circuit_from_expr_with_context(args[1], context_entries);
-            let copy = Circuit::copy_n(context_types);
+            let copy = Circuit::copy_wires(context_types);
             let pair = Circuit::Product(Box::new(left), Box::new(right));
             Circuit::Seq(Box::new(copy), Box::new(pair))
         }

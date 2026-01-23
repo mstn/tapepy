@@ -52,8 +52,8 @@ fn assignment_tape(tree: &CommandDerivationTree, name: &str) -> Tape<TypeExpr, E
     let left_id = Circuit::id(left_types.clone());
     let right_id = Circuit::id(right_types.clone());
 
-    let left_copy = Circuit::copy_n(left_types);
-    let right_copy = Circuit::copy_n(right_types);
+    let left_copy = Circuit::copy_wires(left_types);
+    let right_copy = Circuit::copy_wires(right_types);
     let split = Circuit::Product(
         Box::new(left_copy),
         Box::new(Circuit::Product(
@@ -112,7 +112,7 @@ fn if_tape(tree: &CommandDerivationTree) -> Tape<TypeExpr, ExprGenerator> {
             }
         })
         .collect::<Vec<_>>();
-    let copy = Tape::EmbedCircuit(Box::new(Circuit::copy_n(context_types.clone())));
+    let copy = Tape::EmbedCircuit(Box::new(Circuit::copy_wires(context_types.clone())));
     let join = Tape::EmbedCircuit(Box::new(Circuit::join_n(context_types)));
     let branches = Tape::Sum(Box::new(left), Box::new(right));
     Tape::Seq(
@@ -135,7 +135,7 @@ fn gate_tape(
             }
         })
         .collect::<Vec<_>>();
-    let copy = Tape::EmbedCircuit(Box::new(Circuit::copy_n(context_types)));
+    let copy = Tape::EmbedCircuit(Box::new(Circuit::copy_wires(context_types)));
     Tape::Seq(
         Box::new(copy),
         Box::new(Tape::Product(Box::new(pred_tape), Box::new(exec_tape))),

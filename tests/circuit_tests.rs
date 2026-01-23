@@ -1,6 +1,6 @@
 use tapepy::tape_language::circuit::{
-    copy_many, identity_for_types, permute_circuit, product_many, wiring_circuit_for_context,
-    Circuit, Permutation,
+    identity_for_types, permute_circuit, product_many, wiring_circuit_for_context, Circuit,
+    Permutation,
 };
 
 #[test]
@@ -40,10 +40,10 @@ fn product_many_builds_nested_products() {
 }
 
 #[test]
-fn copy_many_handles_base_cases() {
-    let zero: Circuit<char, ()> = copy_many('a', 0);
-    let one: Circuit<char, ()> = copy_many('a', 1);
-    let two: Circuit<char, ()> = copy_many('a', 2);
+fn copy_wire_n_times_handles_base_cases() {
+    let zero: Circuit<char, ()> = Circuit::copy_wire_n_times('a', 0);
+    let one: Circuit<char, ()> = Circuit::copy_wire_n_times('a', 1);
+    let two: Circuit<char, ()> = Circuit::copy_wire_n_times('a', 2);
 
     assert_eq!(zero, Circuit::Discard('a'));
     assert_eq!(one, Circuit::Id('a'));
@@ -51,8 +51,8 @@ fn copy_many_handles_base_cases() {
 }
 
 #[test]
-fn copy_many_expands_fanout() {
-    let circuit: Circuit<char, ()> = copy_many('a', 3);
+fn copy_wire_n_times_expands_fanout() {
+    let circuit: Circuit<char, ()> = Circuit::copy_wire_n_times('a', 3);
     let expected = Circuit::Seq(
         Box::new(Circuit::Copy('a')),
         Box::new(Circuit::Product(

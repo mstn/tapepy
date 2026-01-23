@@ -5,8 +5,8 @@ pub mod circuit;
 pub mod tape;
 
 pub use circuit::{
-    copy_many, identity_for_types, permute_circuit, product_many, wiring_circuit_for_context,
-    Circuit, CircuitArity, Permutation,
+    identity_for_types, permute_circuit, product_many, wiring_circuit_for_context, Circuit,
+    CircuitArity, Permutation,
 };
 pub use tape::{Tape, TapeArity, TapeEdge};
 
