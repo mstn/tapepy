@@ -2,6 +2,7 @@ use crate::command_typing::{CommandChild, CommandDerivationTree, CommandForm};
 use crate::expression_circuit::{self, ExprGenerator};
 use crate::predicate_tape::{tape_from_predicate, tape_from_predicate_with_negation};
 use crate::tape_language::{monomial_from_entries, Circuit, Monomial, Tape};
+use crate::tape_language::tape::monomial_atoms;
 use crate::types::TypeExpr;
 
 pub fn tape_from_command(tree: &CommandDerivationTree) -> Tape<TypeExpr, ExprGenerator> {
@@ -157,55 +158,4 @@ fn command_children(
 fn context_monomial(tree: &CommandDerivationTree) -> Monomial<TypeExpr> {
     let entries = tree.judgment().context().entries();
     monomial_from_entries(entries)
-}
-
-fn monomial_atoms<S: Clone>(monomial: &Monomial<S>) -> Vec<Monomial<S>> {
-    match monomial {
-        Monomial::One => Vec::new(),
-        Monomial::Atom(sort) => vec![Monomial::atom(sort.clone())],
-        Monomial::Product(left, right) => {
-            let mut atoms = monomial_atoms(left);
-            atoms.extend(monomial_atoms(right));
-            atoms
-        }
-    }
-}
-
-fn id_from_entries(entries: &[(String, TypeExpr)]) -> Tape<TypeExpr, ExprGenerator> {
-    if entries.is_empty() {
-        Tape::IdZero
-    } else {
-        Tape::Id(monomial_from_entries(entries))
-    }
-}
-
-fn tensor_tapes(mut tapes: Vec<Tape<TypeExpr, ExprGenerator>>) -> Tape<TypeExpr, ExprGenerator> {
-    tapes.retain(|tape| tape.arity().inputs != 0 || tape.arity().outputs != 0);
-    if tapes.is_empty() {
-        return Tape::IdZero;
-    }
-    let mut acc = tapes.remove(0);
-    for tape in tapes {
-        acc = Tape::Sum(Box::new(acc), Box::new(tape));
-    }
-    acc
-}
-
-fn split_context_for_assignment(
-    context_entries: &[(String, TypeExpr)],
-    target_index: usize,
-) -> Tape<TypeExpr, ExprGenerator> {
-    let left = monomial_from_entries(&context_entries[..target_index]);
-    let right = monomial_from_entries(&context_entries[target_index + 1..]);
-    let target_ty = context_entries[target_index].1.clone();
-
-    let mut parts = Vec::new();
-    if left.len() != 0 {
-        parts.push(Tape::Split(left));
-    }
-    parts.push(Tape::Id(Monomial::atom(target_ty)));
-    if right.len() != 0 {
-        parts.push(Tape::Split(right));
-    }
-    tensor_tapes(parts)
 }

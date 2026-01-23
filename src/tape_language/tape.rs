@@ -256,7 +256,7 @@ fn embed_circuit<S: Clone + PartialEq, G: GeneratorShape + GeneratorTypes<S> + C
     }
 }
 
-fn monomial_atoms<S: Clone>(monomial: &Monomial<S>) -> Vec<Monomial<S>> {
+pub fn monomial_atoms<S: Clone>(monomial: &Monomial<S>) -> Vec<Monomial<S>> {
     match monomial {
         Monomial::One => Vec::new(),
         Monomial::Atom(sort) => vec![Monomial::atom(sort.clone())],
