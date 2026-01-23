@@ -1,10 +1,7 @@
 use std::fmt;
-use std::sync::atomic::{AtomicUsize, Ordering};
-
-use open_hypergraphs::lax::OpenHypergraph;
 
 use crate::tape_language::{Circuit, GeneratorShape, GeneratorTypes, Monomial};
-use crate::types::{TypeExpr, TypeVar};
+use crate::types::TypeExpr;
 use crate::typing::{DeductionTree, ExprForm};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -17,16 +14,6 @@ pub struct ExprGenerator {
 }
 
 impl ExprGenerator {
-    pub fn new(name: impl Into<String>, arity: usize, coarity: usize) -> Self {
-        Self {
-            name: name.into(),
-            arity,
-            coarity,
-            input_types: None,
-            output_types: None,
-        }
-    }
-
     pub fn typed(
         name: impl Into<String>,
         input_types: Vec<TypeExpr>,
@@ -84,8 +71,6 @@ impl GeneratorTypes<Monomial<TypeExpr>> for ExprGenerator {
     }
 }
 
-/// Builds a circuit skeleton from an expression derivation tree.
-/// Note: this ignores context wiring and variable sharing; composition is length-only.
 pub fn circuit_from_expr(tree: &DeductionTree) -> Circuit<TypeExpr, ExprGenerator> {
     match tree.form() {
         ExprForm::Var(_) => Circuit::Id(tree.judgment().ty().clone()),
@@ -168,18 +153,11 @@ pub fn circuit_from_expr_with_context(
     tree: &DeductionTree,
     context_entries: &[(String, TypeExpr)],
 ) -> Circuit<TypeExpr, ExprGenerator> {
+    // Build the input wiring (copy/discard/permute) from the context, then
+    // feed the resulting wires into the expression body.
     let wiring = wiring_circuit_for_expression(tree, context_entries);
     let expr = circuit_from_expr(tree);
     Circuit::Seq(Box::new(wiring), Box::new(expr))
-}
-
-pub fn hypergraph_from_circuit(
-    circuit: &Circuit<TypeExpr, ExprGenerator>,
-) -> OpenHypergraph<TypeExpr, ExprGenerator> {
-    circuit.to_hypergraph(&mut || {
-        let id = NEXT_TYPE_VAR.fetch_add(1, Ordering::Relaxed);
-        TypeExpr::Var(TypeVar(id))
-    })
 }
 
 fn product_many<S, G>(mut circuits: Vec<Circuit<S, G>>) -> Circuit<S, G> {
@@ -232,6 +210,7 @@ fn wiring_circuit_for_expression(
     tree: &DeductionTree,
     context_entries: &[(String, TypeExpr)],
 ) -> Circuit<TypeExpr, ExprGenerator> {
+    // Determine the exact order and multiplicity of variable uses in the expression.
     let input_vars = expr_input_vars(tree);
     let mut counts = Vec::with_capacity(context_entries.len());
     for (name, _) in context_entries {
@@ -239,12 +218,14 @@ fn wiring_circuit_for_expression(
         counts.push(count);
     }
 
+    // For each context entry, build the required fanout (or discard) circuit.
     let mut var_circuits = Vec::with_capacity(context_entries.len());
     for ((_, ty), count) in context_entries.iter().zip(counts.iter().copied()) {
         var_circuits.push(copy_n(ty.clone(), count));
     }
     let grouped = product_many(var_circuits);
 
+    // Reorder grouped wires to match the expression's traversal order.
     let grouped_types = grouped_types(context_entries, &counts);
     let permutation = permutation_for_inputs(context_entries, &input_vars, &counts);
     if permutation.is_identity() {
@@ -255,10 +236,7 @@ fn wiring_circuit_for_expression(
     }
 }
 
-fn grouped_types(
-    context_entries: &[(String, TypeExpr)],
-    counts: &[usize],
-) -> Vec<TypeExpr> {
+fn grouped_types(context_entries: &[(String, TypeExpr)], counts: &[usize]) -> Vec<TypeExpr> {
     let mut types = Vec::new();
     for ((_, ty), count) in context_entries.iter().zip(counts.iter().copied()) {
         for _ in 0..count {
@@ -301,6 +279,7 @@ fn copy_n(ty: TypeExpr, count: usize) -> Circuit<TypeExpr, ExprGenerator> {
         1 => Circuit::Id(ty),
         2 => Circuit::Copy(ty),
         _ => {
+            // Expand fanout by one wire at a time.
             let left = Circuit::Id(ty.clone());
             let right = copy_n(ty.clone(), count - 1);
             let prod = Circuit::Product(Box::new(left), Box::new(right));
@@ -334,9 +313,11 @@ fn permute_circuit(
     if swaps.is_empty() {
         identity_for_types(types)
     } else {
-        swaps.into_iter().fold(identity_for_types(types), |acc, swap| {
-            Circuit::Seq(Box::new(acc), Box::new(swap))
-        })
+        swaps
+            .into_iter()
+            .fold(identity_for_types(types), |acc, swap| {
+                Circuit::Seq(Box::new(acc), Box::new(swap))
+            })
     }
 }
 
@@ -384,37 +365,4 @@ fn lookup_var_type(name: &str, context_entries: &[(String, TypeExpr)]) -> TypeEx
         .find(|(var, _)| var == name)
         .map(|(_, ty)| ty.clone())
         .unwrap_or_else(|| panic!("variable `{}` not in context", name))
-}
-
-static NEXT_TYPE_VAR: AtomicUsize = AtomicUsize::new(0);
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use rustpython_parser::{ast, Parse};
-
-    #[test]
-    fn complex_expression_hypergraph_contains_expected_ops() {
-        let source =
-            "(abs(x + 2) * float(y) + max(3, int(z))) > 0 and not (x < 1)";
-        let expr = ast::Expr::parse(source, "<test>").expect("parse expression");
-        let tree = crate::typing::infer_expression(&expr);
-        let circuit = circuit_from_expr(&tree);
-        let graph = hypergraph_from_circuit(&circuit);
-
-        let labels: Vec<String> = graph
-            .hypergraph
-            .edges
-            .iter()
-            .map(|edge| edge.name.clone())
-            .collect();
-
-        for expected in ["abs", "+", "*", "float", "max", "int", ">", "<", "not", "and"] {
-            assert!(
-                labels.iter().any(|label| label == expected),
-                "missing edge label `{}`",
-                expected
-            );
-        }
-    }
 }
