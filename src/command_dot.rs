@@ -233,8 +233,6 @@ fn extend_graph<O: Clone>(
 fn edge_label<O>(edge: &CommandEdge, opts: &Options<O, CommandEdge>) -> String {
     match edge {
         CommandEdge::Atom(_) => (opts.edge_label)(edge),
-        CommandEdge::Convolution(_) => "Convolution".to_string(),
-        CommandEdge::Kleene(_) => "Kleene".to_string(),
         CommandEdge::Embedded(_) => "Embed".to_string(),
     }
 }
@@ -587,8 +585,7 @@ fn generate_tape_edge_clusters<G: Clone + fmt::Display>(
                 let left_prefix = format!("{}e_{}_l_", prefix, edge_idx);
                 let right_prefix = format!("{}e_{}_r_", prefix, edge_idx);
 
-                for (outer_node, &child_node) in
-                    parent_left_sources.iter().zip(left.sources.iter())
+                for (outer_node, &child_node) in parent_left_sources.iter().zip(left.sources.iter())
                 {
                     let edge = Edge {
                         ty: EdgeTy::Pair(
@@ -608,8 +605,7 @@ fn generate_tape_edge_clusters<G: Clone + fmt::Display>(
                     };
                     stmts.push(Stmt::Edge(edge));
                 }
-                for (outer_node, &child_node) in
-                    parent_left_targets.iter().zip(left.targets.iter())
+                for (outer_node, &child_node) in parent_left_targets.iter().zip(left.targets.iter())
                 {
                     let edge = Edge {
                         ty: EdgeTy::Pair(
@@ -809,92 +805,8 @@ fn generate_edge_stmts<O: Clone>(
                     attributes,
                 }));
             }
-            CommandEdge::Convolution(children) => {
-                for (src_idx, &node_id) in hyperedge.sources.iter().enumerate() {
-                    let label = (opts.node_label)(&graph.hypergraph.nodes[node_id.0]);
-                    let label = escape_dot_label(&label);
-                    stmts.push(Stmt::Node(Node {
-                        id: NodeId(
-                            Id::Plain(format!("{}e_{}_split_n_{}", prefix, i, src_idx)),
-                            None,
-                        ),
-                        attributes: vec![
-                            Attribute(
-                                Id::Plain(String::from("shape")),
-                                Id::Plain(String::from("point")),
-                            ),
-                            Attribute(
-                                Id::Plain(String::from("xlabel")),
-                                Id::Plain(format!("\"{}\"", label)),
-                            ),
-                        ],
-                    }));
-                }
-                for (tgt_idx, &node_id) in hyperedge.targets.iter().enumerate() {
-                    let label = (opts.node_label)(&graph.hypergraph.nodes[node_id.0]);
-                    let label = escape_dot_label(&label);
-                    stmts.push(Stmt::Node(Node {
-                        id: NodeId(
-                            Id::Plain(format!("{}e_{}_join_n_{}", prefix, i, tgt_idx)),
-                            None,
-                        ),
-                        attributes: vec![
-                            Attribute(
-                                Id::Plain(String::from("shape")),
-                                Id::Plain(String::from("point")),
-                            ),
-                            Attribute(
-                                Id::Plain(String::from("xlabel")),
-                                Id::Plain(format!("\"{}\"", label)),
-                            ),
-                        ],
-                    }));
-                }
-            }
             CommandEdge::Embedded(child) => {
                 let _child = child;
-            }
-            CommandEdge::Kleene(_) => {
-                for (src_idx, &node_id) in hyperedge.sources.iter().enumerate() {
-                    let label = (opts.node_label)(&graph.hypergraph.nodes[node_id.0]);
-                    let label = escape_dot_label(&label);
-                    stmts.push(Stmt::Node(Node {
-                        id: NodeId(
-                            Id::Plain(format!("{}e_{}_split_n_{}", prefix, i, src_idx)),
-                            None,
-                        ),
-                        attributes: vec![
-                            Attribute(
-                                Id::Plain(String::from("shape")),
-                                Id::Plain(String::from("point")),
-                            ),
-                            Attribute(
-                                Id::Plain(String::from("xlabel")),
-                                Id::Plain(format!("\"{}\"", label)),
-                            ),
-                        ],
-                    }));
-                }
-                for (tgt_idx, &node_id) in hyperedge.targets.iter().enumerate() {
-                    let label = (opts.node_label)(&graph.hypergraph.nodes[node_id.0]);
-                    let label = escape_dot_label(&label);
-                    stmts.push(Stmt::Node(Node {
-                        id: NodeId(
-                            Id::Plain(format!("{}e_{}_join_n_{}", prefix, i, tgt_idx)),
-                            None,
-                        ),
-                        attributes: vec![
-                            Attribute(
-                                Id::Plain(String::from("shape")),
-                                Id::Plain(String::from("point")),
-                            ),
-                            Attribute(
-                                Id::Plain(String::from("xlabel")),
-                                Id::Plain(format!("\"{}\"", label)),
-                            ),
-                        ],
-                    }));
-                }
             }
         }
     }
@@ -1103,144 +1015,6 @@ fn generate_edge_clusters<O: Clone>(
     for (edge_idx, edge_label) in graph.hypergraph.edges.iter().enumerate() {
         match edge_label {
             CommandEdge::Atom(_) => continue,
-            CommandEdge::Convolution(children) => {
-                let child_opts = child_opts_from_parent(opts);
-                let cluster_id = format!("cluster_{}e_{}", prefix, edge_idx);
-                let mut cluster = Subgraph {
-                    id: Id::Plain(cluster_id.clone()),
-                    stmts: vec![
-                        Stmt::Attribute(Attribute(
-                            Id::Plain(String::from("label")),
-                            Id::Plain(String::from("\"Convolution\"")),
-                        )),
-                        Stmt::Attribute(Attribute(
-                            Id::Plain(String::from("color")),
-                            Id::Plain(format!("\"{}\"", theme.color.clone())),
-                        )),
-                        Stmt::Attribute(Attribute(
-                            Id::Plain(String::from("fontcolor")),
-                            Id::Plain(format!("\"{}\"", theme.fontcolor.clone())),
-                        )),
-                        Stmt::Attribute(Attribute(
-                            Id::Plain(String::from("style")),
-                            Id::Plain(String::from("rounded")),
-                        )),
-                    ],
-                };
-
-                let parent_sources_len = graph.hypergraph.adjacency[edge_idx].sources.len();
-                let parent_targets_len = graph.hypergraph.adjacency[edge_idx].targets.len();
-                for (j, &node_id) in graph.hypergraph.adjacency[edge_idx]
-                    .sources
-                    .iter()
-                    .enumerate()
-                {
-                    let edge = Edge {
-                        ty: EdgeTy::Pair(
-                            Vertex::N(NodeId(
-                                Id::Plain(format!("{}n_{}", prefix, node_id.0)),
-                                None,
-                            )),
-                            Vertex::N(NodeId(
-                                Id::Plain(format!("{}e_{}_split_n_{}", prefix, edge_idx, j)),
-                                None,
-                            )),
-                        ),
-                        attributes: vec![],
-                    };
-                    stmts.push(Stmt::Edge(edge));
-                }
-                for (j, &node_id) in graph.hypergraph.adjacency[edge_idx]
-                    .targets
-                    .iter()
-                    .enumerate()
-                {
-                    let edge = Edge {
-                        ty: EdgeTy::Pair(
-                            Vertex::N(NodeId(
-                                Id::Plain(format!("{}e_{}_join_n_{}", prefix, edge_idx, j)),
-                                None,
-                            )),
-                            Vertex::N(NodeId(
-                                Id::Plain(format!("{}n_{}", prefix, node_id.0)),
-                                None,
-                            )),
-                        ),
-                        attributes: vec![],
-                    };
-                    stmts.push(Stmt::Edge(edge));
-                }
-
-                for (child_idx, child) in children.iter().enumerate() {
-                    let child = child.clone();
-                    let child =
-                        ensure_interface_lengths(child, parent_sources_len, parent_targets_len);
-                    let child_prefix = format!("{}e_{}_c{}_", prefix, edge_idx, child_idx);
-                    for (j, &child_source) in child.sources.iter().enumerate() {
-                        let edge = Edge {
-                            ty: EdgeTy::Pair(
-                                Vertex::N(NodeId(
-                                    Id::Plain(format!("{}e_{}_split_n_{}", prefix, edge_idx, j)),
-                                    None,
-                                )),
-                                Vertex::N(NodeId(
-                                    Id::Plain(format!("{}n_{}", child_prefix, child_source.0)),
-                                    None,
-                                )),
-                            ),
-                            attributes: vec![Attribute(
-                                Id::Plain(String::from("style")),
-                                Id::Plain(String::from("dotted")),
-                            )],
-                        };
-                        stmts.push(Stmt::Edge(edge));
-                    }
-                    for (j, &child_target) in child.targets.iter().enumerate() {
-                        let edge = Edge {
-                            ty: EdgeTy::Pair(
-                                Vertex::N(NodeId(
-                                    Id::Plain(format!("{}n_{}", child_prefix, child_target.0)),
-                                    None,
-                                )),
-                                Vertex::N(NodeId(
-                                    Id::Plain(format!("{}e_{}_join_n_{}", prefix, edge_idx, j)),
-                                    None,
-                                )),
-                            ),
-                            attributes: vec![Attribute(
-                                Id::Plain(String::from("style")),
-                                Id::Plain(String::from("dotted")),
-                            )],
-                        };
-                        stmts.push(Stmt::Edge(edge));
-                    }
-                    let mut child_cluster = Subgraph {
-                        id: Id::Plain(format!("cluster_{}", child_prefix)),
-                        stmts: vec![Stmt::Attribute(Attribute(
-                            Id::Plain(String::from("label")),
-                            Id::Plain(format!("\"alt {}\"", child_idx)),
-                        ))],
-                    };
-                    for stmt in generate_node_stmts(&child, &child_opts, &child_prefix) {
-                        child_cluster.add_stmt(stmt);
-                    }
-                    for stmt in generate_edge_stmts(&child, &child_opts, &child_prefix) {
-                        child_cluster.add_stmt(stmt);
-                    }
-                    for stmt in generate_interface_stmts(&child, &child_prefix) {
-                        child_cluster.add_stmt(stmt);
-                    }
-                    for stmt in generate_connection_stmts(&child, &child_prefix) {
-                        child_cluster.add_stmt(stmt);
-                    }
-                    for stmt in generate_quotient_stmts(&child, &child_prefix) {
-                        child_cluster.add_stmt(stmt);
-                    }
-                    cluster.add_stmt(Stmt::Subgraph(child_cluster));
-                }
-
-                stmts.push(Stmt::Subgraph(cluster));
-            }
             CommandEdge::Embedded(child) => {
                 let child_opts = child_opts_from_parent(opts);
                 let cluster_id = format!("cluster_{}e_{}", prefix, edge_idx);
@@ -1324,140 +1098,6 @@ fn generate_edge_clusters<O: Clone>(
                 for stmt in generate_quotient_stmts(&child, &child_prefix) {
                     cluster.add_stmt(stmt);
                 }
-                stmts.push(Stmt::Subgraph(cluster));
-            }
-            CommandEdge::Kleene(child) => {
-                let child_opts = child_opts_from_parent(opts);
-                let cluster_id = format!("cluster_{}e_{}", prefix, edge_idx);
-                let mut cluster = Subgraph {
-                    id: Id::Plain(cluster_id.clone()),
-                    stmts: vec![
-                        Stmt::Attribute(Attribute(
-                            Id::Plain(String::from("label")),
-                            Id::Plain(String::from("\"Kleene\"")),
-                        )),
-                        Stmt::Attribute(Attribute(
-                            Id::Plain(String::from("color")),
-                            Id::Plain(format!("\"{}\"", theme.color.clone())),
-                        )),
-                        Stmt::Attribute(Attribute(
-                            Id::Plain(String::from("fontcolor")),
-                            Id::Plain(format!("\"{}\"", theme.fontcolor.clone())),
-                        )),
-                        Stmt::Attribute(Attribute(
-                            Id::Plain(String::from("style")),
-                            Id::Plain(String::from("rounded")),
-                        )),
-                    ],
-                };
-
-                let parent_sources_len = graph.hypergraph.adjacency[edge_idx].sources.len();
-                let parent_targets_len = graph.hypergraph.adjacency[edge_idx].targets.len();
-                for (j, &node_id) in graph.hypergraph.adjacency[edge_idx]
-                    .sources
-                    .iter()
-                    .enumerate()
-                {
-                    let edge = Edge {
-                        ty: EdgeTy::Pair(
-                            Vertex::N(NodeId(
-                                Id::Plain(format!("{}n_{}", prefix, node_id.0)),
-                                None,
-                            )),
-                            Vertex::N(NodeId(
-                                Id::Plain(format!("{}e_{}_split_n_{}", prefix, edge_idx, j)),
-                                None,
-                            )),
-                        ),
-                        attributes: vec![],
-                    };
-                    stmts.push(Stmt::Edge(edge));
-                }
-                for (j, &node_id) in graph.hypergraph.adjacency[edge_idx]
-                    .targets
-                    .iter()
-                    .enumerate()
-                {
-                    let edge = Edge {
-                        ty: EdgeTy::Pair(
-                            Vertex::N(NodeId(
-                                Id::Plain(format!("{}e_{}_join_n_{}", prefix, edge_idx, j)),
-                                None,
-                            )),
-                            Vertex::N(NodeId(
-                                Id::Plain(format!("{}n_{}", prefix, node_id.0)),
-                                None,
-                            )),
-                        ),
-                        attributes: vec![],
-                    };
-                    stmts.push(Stmt::Edge(edge));
-                }
-                let child = child.as_ref().clone();
-                let child = ensure_interface_lengths(child, parent_sources_len, parent_targets_len);
-                let child_prefix = format!("{}e_{}_k_", prefix, edge_idx);
-                for (j, &child_source) in child.sources.iter().enumerate() {
-                    let edge = Edge {
-                        ty: EdgeTy::Pair(
-                            Vertex::N(NodeId(
-                                Id::Plain(format!("{}e_{}_split_n_{}", prefix, edge_idx, j)),
-                                None,
-                            )),
-                            Vertex::N(NodeId(
-                                Id::Plain(format!("{}n_{}", child_prefix, child_source.0)),
-                                None,
-                            )),
-                        ),
-                        attributes: vec![Attribute(
-                            Id::Plain(String::from("style")),
-                            Id::Plain(String::from("dotted")),
-                        )],
-                    };
-                    stmts.push(Stmt::Edge(edge));
-                }
-                for (j, &child_target) in child.targets.iter().enumerate() {
-                    let edge = Edge {
-                        ty: EdgeTy::Pair(
-                            Vertex::N(NodeId(
-                                Id::Plain(format!("{}n_{}", child_prefix, child_target.0)),
-                                None,
-                            )),
-                            Vertex::N(NodeId(
-                                Id::Plain(format!("{}e_{}_join_n_{}", prefix, edge_idx, j)),
-                                None,
-                            )),
-                        ),
-                        attributes: vec![Attribute(
-                            Id::Plain(String::from("style")),
-                            Id::Plain(String::from("dotted")),
-                        )],
-                    };
-                    stmts.push(Stmt::Edge(edge));
-                }
-                let mut child_cluster = Subgraph {
-                    id: Id::Plain(format!("cluster_{}", child_prefix)),
-                    stmts: vec![Stmt::Attribute(Attribute(
-                        Id::Plain(String::from("label")),
-                        Id::Plain(String::from("\"body\"")),
-                    ))],
-                };
-                for stmt in generate_node_stmts(&child, &child_opts, &child_prefix) {
-                    child_cluster.add_stmt(stmt);
-                }
-                for stmt in generate_edge_stmts(&child, &child_opts, &child_prefix) {
-                    child_cluster.add_stmt(stmt);
-                }
-                for stmt in generate_interface_stmts(&child, &child_prefix) {
-                    child_cluster.add_stmt(stmt);
-                }
-                for stmt in generate_connection_stmts(&child, &child_prefix) {
-                    child_cluster.add_stmt(stmt);
-                }
-                for stmt in generate_quotient_stmts(&child, &child_prefix) {
-                    child_cluster.add_stmt(stmt);
-                }
-                cluster.add_stmt(Stmt::Subgraph(child_cluster));
-
                 stmts.push(Stmt::Subgraph(cluster));
             }
         }

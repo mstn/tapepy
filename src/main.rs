@@ -1,11 +1,9 @@
 mod command_dot;
 mod command_edge;
-mod command_hypergraph;
 mod command_tape;
 mod command_typing;
 mod context;
 mod expression_circuit;
-mod hypergraph;
 mod predicate_tape;
 mod program_tape;
 mod python_builtin_signatures;
