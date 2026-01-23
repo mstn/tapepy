@@ -1,11 +1,11 @@
-use open_hypergraphs::lax::{Arrow as _, Monoidal, OpenHypergraph};
+use open_hypergraphs::lax::{Monoidal, OpenHypergraph};
 use std::fmt;
 
 pub mod circuit;
 pub mod tape;
 
-pub use circuit::{Circuit, CircuitArity};
-pub use tape::{Tape, TapeArity, TapeEdge};
+pub use circuit::Circuit;
+pub use tape::{Tape, TapeEdge};
 
 pub trait GeneratorShape {
     fn arity(&self) -> usize;
@@ -104,6 +104,12 @@ impl<S> Polynomial<S> {
             (left, right) => Polynomial::Sum(Box::new(left), Box::new(right)),
         }
     }
+}
+
+pub fn monomial_from_entries<S: Clone>(entries: &[(String, S)]) -> Monomial<S> {
+    entries.iter().fold(Monomial::one(), |acc, (_, ty)| {
+        Monomial::product(acc, Monomial::atom(ty.clone()))
+    })
 }
 
 pub(crate) fn compose_lax_unchecked<S: Clone + PartialEq, G: Clone>(

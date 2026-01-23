@@ -1,7 +1,7 @@
 use crate::command_typing::{CommandChild, CommandDerivationTree, CommandForm};
 use crate::expression_circuit::{self, ExprGenerator};
 use crate::predicate_tape::{tape_from_predicate, tape_from_predicate_with_negation};
-use crate::tape_language::{Circuit, Monomial, Tape};
+use crate::tape_language::{monomial_from_entries, Circuit, Monomial, Tape};
 use crate::types::TypeExpr;
 
 pub fn tape_from_command(tree: &CommandDerivationTree) -> Tape<TypeExpr, ExprGenerator> {
@@ -169,12 +169,6 @@ fn monomial_atoms<S: Clone>(monomial: &Monomial<S>) -> Vec<Monomial<S>> {
             atoms
         }
     }
-}
-
-fn monomial_from_entries(entries: &[(String, TypeExpr)]) -> Monomial<TypeExpr> {
-    entries.iter().fold(Monomial::one(), |acc, (_, ty)| {
-        Monomial::product(acc, Monomial::atom(ty.clone()))
-    })
 }
 
 fn id_from_entries(entries: &[(String, TypeExpr)]) -> Tape<TypeExpr, ExprGenerator> {
