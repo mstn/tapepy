@@ -88,7 +88,17 @@ fn tape_from_relation(
     args: Vec<&DeductionTree>,
     negated: bool,
 ) -> Tape<TypeExpr, ExprGenerator> {
-    let context_entries = context_entries_from_args(&args);
+    let context_entries = if let Some(first) = args.first() {
+        let expected = first.judgment().context().entries();
+        for arg in &args {
+            if arg.judgment().context().entries() != expected {
+                panic!("predicate relation arguments have different contexts");
+            }
+        }
+        expected.to_vec()
+    } else {
+        Vec::new()
+    };
     let circuit = circuit_from_relation(name, &args, &context_entries, negated);
     let embed = Tape::EmbedCircuit(Box::new(circuit));
     let discard = Tape::Discard(Monomial::atom(TypeExpr::Unit));
@@ -131,10 +141,4 @@ fn circuit_from_relation(
     base
 }
 
-fn context_entries_from_args(args: &[&DeductionTree]) -> Vec<(String, TypeExpr)> {
-    if let Some(first) = args.first() {
-        first.judgment().context().entries().to_vec()
-    } else {
-        Vec::new()
-    }
-}
+ 
