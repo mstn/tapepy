@@ -231,31 +231,6 @@ fn interface_labels<S: Clone, G>(
         .collect()
 }
 
-fn fresh_monomials<S>(fresh_sort: &mut impl FnMut() -> S, count: usize) -> Vec<Monomial<S>> {
-    (0..count).map(|_| Monomial::atom(fresh_sort())).collect()
-}
-
-fn embed_circuit<S: Clone + PartialEq, G: GeneratorShape + GeneratorTypes<S> + Clone>(
-    circuit: &Circuit<S, G>,
-    fresh_sort: &mut impl FnMut() -> S,
-) -> OpenHypergraph<Monomial<S>, Circuit<Monomial<S>, G>> {
-    let lifted = lift_circuit(circuit);
-    if let Some((inputs, outputs)) = circuit.io_types() {
-        OpenHypergraph::singleton(
-            lifted,
-            inputs.into_iter().map(Monomial::atom).collect(),
-            outputs.into_iter().map(Monomial::atom).collect(),
-        )
-    } else {
-        let arity = circuit.arity();
-        OpenHypergraph::singleton(
-            lifted,
-            fresh_monomials(fresh_sort, arity.inputs),
-            fresh_monomials(fresh_sort, arity.outputs),
-        )
-    }
-}
-
 pub fn monomial_atoms<S: Clone>(monomial: &Monomial<S>) -> Vec<Monomial<S>> {
     match monomial {
         Monomial::One => Vec::new(),
@@ -288,25 +263,4 @@ fn add_nodes<S: Clone, G>(
         .iter()
         .map(|label| graph.new_node(label.clone()))
         .collect()
-}
-
-fn lift_circuit<S: Clone, G: Clone>(circuit: &Circuit<S, G>) -> Circuit<Monomial<S>, G> {
-    match circuit {
-        Circuit::Id(sort) => Circuit::Id(Monomial::atom(sort.clone())),
-        Circuit::IdOne => Circuit::IdOne,
-        Circuit::Generator(gen) => Circuit::Generator(gen.clone()),
-        Circuit::Swap { left, right } => Circuit::Swap {
-            left: Monomial::atom(left.clone()),
-            right: Monomial::atom(right.clone()),
-        },
-        Circuit::Seq(left, right) => {
-            Circuit::Seq(Box::new(lift_circuit(left)), Box::new(lift_circuit(right)))
-        }
-        Circuit::Product(left, right) => {
-            Circuit::Product(Box::new(lift_circuit(left)), Box::new(lift_circuit(right)))
-        }
-        Circuit::Copy(sort) => Circuit::Copy(Monomial::atom(sort.clone())),
-        Circuit::Discard(sort) => Circuit::Discard(Monomial::atom(sort.clone())),
-        Circuit::Join(sort) => Circuit::Join(Monomial::atom(sort.clone())),
-    }
 }
