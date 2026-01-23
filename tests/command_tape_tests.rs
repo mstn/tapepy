@@ -257,6 +257,55 @@ fn if_builds_copy_branches_and_join() {
     }
 }
 
+#[test]
+fn three_assigns_embed_nested_seq_circuit() {
+    let (_tree, tape) = infer_tape("x = 1\nx = 2\nx = 3");
+    let x_ty = TypeExpr::Var(tapepy::types::TypeVar(0));
+
+    let assign1 = Circuit::seq(
+        Circuit::Id(x_ty.clone()),
+        Circuit::seq(
+            Circuit::Discard(x_ty.clone()),
+            Circuit::Generator(ExprGenerator::Function {
+                name: "1".to_string(),
+                input_types: Vec::new(),
+                output_types: vec![TypeExpr::Int],
+            }),
+        ),
+    );
+    let assign2 = Circuit::seq(
+        Circuit::Id(x_ty.clone()),
+        Circuit::seq(
+            Circuit::Discard(x_ty.clone()),
+            Circuit::Generator(ExprGenerator::Function {
+                name: "2".to_string(),
+                input_types: Vec::new(),
+                output_types: vec![TypeExpr::Int],
+            }),
+        ),
+    );
+    let assign3 = Circuit::seq(
+        Circuit::Id(x_ty.clone()),
+        Circuit::seq(
+            Circuit::Discard(x_ty.clone()),
+            Circuit::Generator(ExprGenerator::Function {
+                name: "3".to_string(),
+                input_types: Vec::new(),
+                output_types: vec![TypeExpr::Int],
+            }),
+        ),
+    );
+
+    let expected = Circuit::seq(Circuit::seq(assign1, assign2), assign3);
+
+    match tape {
+        Tape::EmbedCircuit(circuit) => {
+            assert_eq!(*circuit, expected);
+        }
+        _ => panic!("expected embedded circuit for three assignments"),
+    }
+}
+
 fn tape_io_types(tape: &Tape<TypeExpr, ExprGenerator>) -> Option<(Vec<TypeExpr>, Vec<TypeExpr>)> {
     match tape {
         Tape::Id(mono) => {
