@@ -306,6 +306,239 @@ fn three_assigns_embed_nested_seq_circuit() {
     }
 }
 
+#[test]
+fn nested_ifs_with_assignments_and_complex_conditions() {
+    let (_tree, tape) = infer_tape(
+        "if x > 0:\n  if y > 0:\n    x = 1\n  else:\n    x = 2\nelse:\n  if y > 0:\n    x = 3\n  else:\n    x = 4",
+    );
+
+    let x_ty = TypeExpr::Var(tapepy::types::TypeVar(0));
+    let y_ty = TypeExpr::Var(tapepy::types::TypeVar(1));
+    let types = vec![x_ty.clone(), y_ty.clone()];
+
+    match tape {
+        Tape::Seq(copy, tail) => {
+            assert_copy_wires_tape(&copy, &types);
+            match *tail {
+                Tape::Seq(branches, join) => {
+                    assert_join_wires_tape(&join, &types);
+                    match *branches {
+                        Tape::Sum(left, right) => {
+                            assert_gate_tape(
+                                &left,
+                                &types,
+                                vec![x_ty.clone(), TypeExpr::Int],
+                                false,
+                            );
+                            assert_gate_tape(
+                                &right,
+                                &types,
+                                vec![x_ty.clone(), TypeExpr::Int],
+                                true,
+                            );
+
+                            assert_nested_if_for_y(&left, &x_ty, &y_ty, "1", "2");
+                            assert_nested_if_for_y(&right, &x_ty, &y_ty, "3", "4");
+                        }
+                        _ => panic!("expected sum of branches for outer if"),
+                    }
+                }
+                _ => panic!("expected seq of branches and join for outer if"),
+            }
+        }
+        _ => panic!("expected outer seq with copy for nested ifs"),
+    }
+}
+
+fn assert_copy_wires_tape(tape: &Tape<TypeExpr, ExprGenerator>, types: &[TypeExpr]) {
+    match tape {
+        Tape::EmbedCircuit(circuit) => {
+            assert_eq!(**circuit, Circuit::copy_wires(types.to_vec()));
+        }
+        _ => panic!("expected embedded copy circuit"),
+    }
+}
+
+fn assert_join_wires_tape(tape: &Tape<TypeExpr, ExprGenerator>, types: &[TypeExpr]) {
+    match tape {
+        Tape::EmbedCircuit(circuit) => {
+            assert_eq!(**circuit, Circuit::join_wires(types.to_vec()));
+        }
+        _ => panic!("expected embedded join circuit"),
+    }
+}
+
+fn assert_gate_tape(
+    tape: &Tape<TypeExpr, ExprGenerator>,
+    types: &[TypeExpr],
+    pred_inputs: Vec<TypeExpr>,
+    negated: bool,
+) {
+    match tape {
+        Tape::Seq(copy, prod) => {
+            assert_copy_wires_tape(copy, types);
+            match &**prod {
+                Tape::Product(pred, _exec) => {
+                    assert_predicate_compare_tape(pred, pred_inputs, negated);
+                }
+                _ => panic!("expected product in gate tape"),
+            }
+        }
+        _ => panic!("expected seq in gate tape"),
+    }
+}
+
+fn assert_predicate_compare_tape(
+    tape: &Tape<TypeExpr, ExprGenerator>,
+    expected_inputs: Vec<TypeExpr>,
+    negated: bool,
+) {
+    match tape {
+        Tape::Seq(embed, discard) => {
+            assert!(matches!(
+                **discard,
+                Tape::Discard(Monomial::Atom(TypeExpr::Bool))
+            ));
+            match &**embed {
+                Tape::EmbedCircuit(circuit) => match &**circuit {
+                    Circuit::Seq(_, op) => match &**op {
+                        Circuit::Generator(ExprGenerator::Predicate {
+                            name,
+                            input_types,
+                            negated: gen_neg,
+                        }) => {
+                            assert_eq!(name, ">");
+                            assert_eq!(*gen_neg, negated);
+                            assert_eq!(*input_types, expected_inputs);
+                        }
+                        _ => panic!("expected predicate generator"),
+                    },
+                    _ => panic!("expected seq in predicate circuit"),
+                },
+                _ => panic!("expected embedded circuit in predicate tape"),
+            }
+        }
+        _ => panic!("expected seq in predicate tape"),
+    }
+}
+
+fn assert_nested_if_for_y(
+    tape: &Tape<TypeExpr, ExprGenerator>,
+    x_ty: &TypeExpr,
+    y_ty: &TypeExpr,
+    then_label: &str,
+    else_label: &str,
+) {
+    let exec = match tape {
+        Tape::Seq(_, prod) => match &**prod {
+            Tape::Product(_, exec) => exec,
+            _ => panic!("expected product in gate tape for nested if"),
+        },
+        _ => panic!("expected seq in gate tape for nested if"),
+    };
+
+    match &**exec {
+        Tape::Seq(copy, tail) => {
+            assert_copy_wires_tape(copy, &[x_ty.clone(), y_ty.clone()]);
+            match &**tail {
+                Tape::Seq(branches, join) => {
+                    assert_join_wires_tape(join, &[x_ty.clone(), y_ty.clone()]);
+                    match &**branches {
+                        Tape::Sum(left, right) => {
+                            assert_gate_tape(
+                                left,
+                                &[x_ty.clone(), y_ty.clone()],
+                                vec![y_ty.clone(), TypeExpr::Int],
+                                false,
+                            );
+                            assert_gate_tape(
+                                right,
+                                &[x_ty.clone(), y_ty.clone()],
+                                vec![y_ty.clone(), TypeExpr::Int],
+                                true,
+                            );
+                            assert_assign_tape_x(left, x_ty, y_ty, then_label);
+                            assert_assign_tape_x(right, x_ty, y_ty, else_label);
+                        }
+                        _ => panic!("expected sum of branches in nested if"),
+                    }
+                }
+                _ => panic!("expected seq of branches and join in nested if"),
+            }
+        }
+        _ => panic!("expected seq in nested if tape"),
+    }
+}
+
+fn assert_assign_tape_x(
+    tape: &Tape<TypeExpr, ExprGenerator>,
+    x_ty: &TypeExpr,
+    y_ty: &TypeExpr,
+    label: &str,
+) {
+    let exec = match tape {
+        Tape::Seq(_, prod) => match &**prod {
+            Tape::Product(_, exec) => exec,
+            _ => panic!("expected product in gate tape for assignment"),
+        },
+        _ => panic!("expected seq in gate tape for assignment"),
+    };
+    match &**exec {
+        Tape::EmbedCircuit(circuit) => assert_assign_circuit_x(circuit, x_ty, y_ty, label),
+        _ => panic!("expected embedded circuit for assignment"),
+    }
+}
+
+fn assert_assign_circuit_x(
+    circuit: &Circuit<TypeExpr, ExprGenerator>,
+    x_ty: &TypeExpr,
+    y_ty: &TypeExpr,
+    label: &str,
+) {
+    match circuit {
+        Circuit::Seq(split, updated) => {
+            match &**split {
+                Circuit::Product(left, right) => {
+                    assert_eq!(**left, Circuit::Id(x_ty.clone()));
+                    assert_eq!(**right, Circuit::Copy(y_ty.clone()));
+                }
+                _ => panic!("expected product in assignment split"),
+            }
+            match &**updated {
+                Circuit::Product(expr, right) => {
+                    assert_eq!(**right, Circuit::Id(y_ty.clone()));
+                    match &**expr {
+                        Circuit::Seq(wiring, gen) => {
+                            assert_eq!(
+                                **wiring,
+                                Circuit::product(
+                                    Circuit::Discard(x_ty.clone()),
+                                    Circuit::Discard(y_ty.clone())
+                                )
+                            );
+                            match &**gen {
+                                Circuit::Generator(ExprGenerator::Function {
+                                    name,
+                                    input_types,
+                                    output_types,
+                                }) => {
+                                    assert_eq!(name, label);
+                                    assert!(input_types.is_empty());
+                                    assert_eq!(*output_types, vec![TypeExpr::Int]);
+                                }
+                                _ => panic!("expected const generator in assignment"),
+                            }
+                        }
+                        _ => panic!("expected seq in assignment expr"),
+                    }
+                }
+                _ => panic!("expected product in assignment update"),
+            }
+        }
+        _ => panic!("expected seq in assignment circuit"),
+    }
+}
+
 fn tape_io_types(tape: &Tape<TypeExpr, ExprGenerator>) -> Option<(Vec<TypeExpr>, Vec<TypeExpr>)> {
     match tape {
         Tape::Id(mono) => {
@@ -377,4 +610,182 @@ fn atoms_to_types(atoms: &[Monomial<TypeExpr>]) -> Vec<TypeExpr> {
             }
         })
         .collect()
+}
+
+#[test]
+fn nested_ifs_with_complex_conditions_and_assignments() {
+    let (_tree, tape) = infer_tape(
+        "if x > 0 and x > 1:\n  if x > 2:\n    x = 3\n  else:\n    x = 4\nelse:\n  if x > 5 or x > 6:\n    x = 7\n  else:\n    x = 8",
+    );
+
+    let x_ty = TypeExpr::Var(tapepy::types::TypeVar(0));
+    let context = Monomial::Atom(x_ty.clone());
+
+    let assign3 = assign_const(&x_ty, "3");
+    let assign4 = assign_const(&x_ty, "4");
+    let assign7 = assign_const(&x_ty, "7");
+    let assign8 = assign_const(&x_ty, "8");
+
+    let pred_x_gt_0 = compare_pred_tape(&x_ty, ">", "0", false);
+    let pred_x_gt_1 = compare_pred_tape(&x_ty, ">", "1", false);
+    let pred_x_gt_0_neg = compare_pred_tape(&x_ty, ">", "0", true);
+    let pred_x_gt_1_neg = compare_pred_tape(&x_ty, ">", "1", true);
+
+    let pred_outer = Tape::Seq(
+        Box::new(Tape::copy_wires(context.clone())),
+        Box::new(Tape::Product(
+            Box::new(pred_x_gt_0),
+            Box::new(pred_x_gt_1),
+        )),
+    );
+    let pred_outer_neg = Tape::Seq(
+        Box::new(Tape::Seq(
+            Box::new(Tape::Split(context.clone())),
+            Box::new(Tape::Sum(
+                Box::new(pred_x_gt_0_neg),
+                Box::new(pred_x_gt_1_neg),
+            )),
+        )),
+        Box::new(Tape::Merge(Monomial::one())),
+    );
+
+    let pred_x_gt_2 = compare_pred_tape(&x_ty, ">", "2", false);
+    let pred_x_gt_2_neg = compare_pred_tape(&x_ty, ">", "2", true);
+    let inner_left = if_tape_with_predicate(
+        &context,
+        pred_x_gt_2,
+        pred_x_gt_2_neg,
+        Tape::EmbedCircuit(Box::new(assign3)),
+        Tape::EmbedCircuit(Box::new(assign4)),
+    );
+
+    let pred_x_gt_5 = compare_pred_tape(&x_ty, ">", "5", false);
+    let pred_x_gt_6 = compare_pred_tape(&x_ty, ">", "6", false);
+    let pred_x_gt_5_neg = compare_pred_tape(&x_ty, ">", "5", true);
+    let pred_x_gt_6_neg = compare_pred_tape(&x_ty, ">", "6", true);
+    let pred_right = Tape::Seq(
+        Box::new(Tape::Seq(
+            Box::new(Tape::Split(context.clone())),
+            Box::new(Tape::Sum(
+                Box::new(pred_x_gt_5),
+                Box::new(pred_x_gt_6),
+            )),
+        )),
+        Box::new(Tape::Merge(Monomial::one())),
+    );
+    let pred_right_neg = Tape::Seq(
+        Box::new(Tape::copy_wires(context.clone())),
+        Box::new(Tape::Product(
+            Box::new(pred_x_gt_5_neg),
+            Box::new(pred_x_gt_6_neg),
+        )),
+    );
+    let inner_right = if_tape_with_predicate(
+        &context,
+        pred_right,
+        pred_right_neg,
+        Tape::EmbedCircuit(Box::new(assign7)),
+        Tape::EmbedCircuit(Box::new(assign8)),
+    );
+
+    let left = gate_tape_for_test(&context, pred_outer, inner_left);
+    let right = gate_tape_for_test(&context, pred_outer_neg, inner_right);
+    let expected = if_tape_with_branches(&context, left, right);
+
+    assert_eq!(tape, expected);
+}
+
+fn assign_const(ty: &TypeExpr, value: &str) -> Circuit<TypeExpr, ExprGenerator> {
+    Circuit::seq(
+        Circuit::Id(ty.clone()),
+        Circuit::seq(
+            Circuit::Discard(ty.clone()),
+            Circuit::Generator(ExprGenerator::Function {
+                name: value.to_string(),
+                input_types: Vec::new(),
+                output_types: vec![TypeExpr::Int],
+            }),
+        ),
+    )
+}
+
+fn compare_pred_tape(
+    x_ty: &TypeExpr,
+    op: &str,
+    const_label: &str,
+    negated: bool,
+) -> Tape<TypeExpr, ExprGenerator> {
+    let arg_x = Circuit::seq(Circuit::Id(x_ty.clone()), Circuit::Id(x_ty.clone()));
+    let arg_const = Circuit::seq(
+        Circuit::Discard(x_ty.clone()),
+        Circuit::Generator(ExprGenerator::Function {
+            name: const_label.to_string(),
+            input_types: Vec::new(),
+            output_types: vec![TypeExpr::Int],
+        }),
+    );
+    let inputs = Circuit::seq(
+        Circuit::Copy(x_ty.clone()),
+        Circuit::product(arg_x, arg_const),
+    );
+    let gen = Circuit::Generator(ExprGenerator::predicate(
+        op.to_string(),
+        vec![x_ty.clone(), TypeExpr::Int],
+        negated,
+    ));
+    let circuit = Circuit::seq(inputs, gen);
+    Tape::Seq(
+        Box::new(Tape::EmbedCircuit(Box::new(circuit))),
+        Box::new(Tape::Discard(Monomial::Atom(TypeExpr::Bool))),
+    )
+}
+
+fn gate_tape_for_test(
+    context: &Monomial<TypeExpr>,
+    pred_tape: Tape<TypeExpr, ExprGenerator>,
+    exec_tape: Tape<TypeExpr, ExprGenerator>,
+) -> Tape<TypeExpr, ExprGenerator> {
+    let copy = Tape::copy_wires(context.clone());
+    Tape::Seq(
+        Box::new(copy),
+        Box::new(Tape::Product(Box::new(pred_tape), Box::new(exec_tape))),
+    )
+}
+
+fn if_tape_with_predicate(
+    context: &Monomial<TypeExpr>,
+    pred_tape: Tape<TypeExpr, ExprGenerator>,
+    neg_pred_tape: Tape<TypeExpr, ExprGenerator>,
+    then_tape: Tape<TypeExpr, ExprGenerator>,
+    else_tape: Tape<TypeExpr, ExprGenerator>,
+) -> Tape<TypeExpr, ExprGenerator> {
+    let left = gate_tape_for_test(context, pred_tape, then_tape);
+    let right = gate_tape_for_test(context, neg_pred_tape, else_tape);
+    if_tape_with_branches(context, left, right)
+}
+
+fn if_tape_with_branches(
+    context: &Monomial<TypeExpr>,
+    left: Tape<TypeExpr, ExprGenerator>,
+    right: Tape<TypeExpr, ExprGenerator>,
+) -> Tape<TypeExpr, ExprGenerator> {
+    let copy = Tape::copy_wires(context.clone());
+    let join = Tape::EmbedCircuit(Box::new(Circuit::join_wires(
+        monomial_atoms(context)
+            .into_iter()
+            .map(|mono| match mono {
+                Monomial::Atom(ty) => ty,
+                Monomial::One | Monomial::Product(_, _) => {
+                    panic!("expected flat context monomial")
+                }
+            })
+            .collect(),
+    )));
+    Tape::Seq(
+        Box::new(copy),
+        Box::new(Tape::Seq(
+            Box::new(Tape::Sum(Box::new(left), Box::new(right))),
+            Box::new(join),
+        )),
+    )
 }
