@@ -1,5 +1,5 @@
 use open_hypergraphs::lax::{Arrow as _, Monoidal, OpenHypergraph};
-use std::fmt::{self, Display};
+use std::fmt::{self, Debug, Display};
 
 use super::{compose_lax_unchecked, Circuit, GeneratorShape, GeneratorTypes, Monomial, Polynomial};
 
@@ -128,7 +128,7 @@ impl<S, G: GeneratorShape> Tape<S, G> {
     }
 }
 
-impl<S: Clone + PartialEq + Display, G: GeneratorTypes<S>> Tape<S, G> {
+impl<S: Clone + PartialEq, G: GeneratorTypes<S>> Tape<S, G> {
     pub fn io_types(&self) -> Option<(Vec<Monomial<S>>, Vec<Monomial<S>>)> {
         match self {
             Tape::Id(mono) => {
@@ -194,8 +194,18 @@ impl<S: Clone + PartialEq + Display, G: GeneratorTypes<S>> Tape<S, G> {
     }
 }
 
-impl<S: Clone + PartialEq + Display, G: GeneratorTypes<S> + Clone> Tape<S, G> {
+impl<S: Clone + PartialEq + Debug + Display, G: GeneratorTypes<S> + Clone + Display> Tape<S, G> {
+    pub fn validate(&self) -> Result<(), TapeValidationError<S>> {
+        validate_tape(self, &mut Vec::new())
+    }
+
     pub fn product(t1: &Tape<S, G>, t2: &Tape<S, G>) -> Tape<S, G> {
+        if let Err(err) = t1.validate() {
+            panic!("product left tape invalid:\n{}", err);
+        }
+        if let Err(err) = t2.validate() {
+            panic!("product right tape invalid:\n{}", err);
+        }
         let (p1_in, _q1_out) = t1.io_types().expect("product requires io types");
         let (_p2_in, q2_out) = t2.io_types().expect("product requires io types");
         let p1 = Polynomial::from_monomials(p1_in);
@@ -225,7 +235,7 @@ impl<S: Clone, G: Clone> Tape<S, G> {
 
     pub fn right_whisk_poly(&self, poly: &Polynomial<S>) -> Tape<S, G>
     where
-        S: PartialEq + Display,
+        S: PartialEq + Debug + Display,
         G: GeneratorTypes<S>,
     {
         let (head, rest) = split_polynomial(poly);
@@ -430,8 +440,8 @@ impl<S: Clone, G: Clone> Whisker<Monomial<S>> for Tape<S, G> {
     }
 }
 
-impl<S: Clone + PartialEq + Display, G: GeneratorTypes<S> + Clone> Whisker<Polynomial<S>>
-    for Tape<S, G>
+impl<S: Clone + PartialEq + Debug + Display, G: GeneratorTypes<S> + Clone + Display>
+    Whisker<Polynomial<S>> for Tape<S, G>
 {
     type Output = Tape<S, G>;
 
@@ -518,6 +528,176 @@ fn polynomial_atom_sorts<S: Clone>(poly: &Polynomial<S>) -> Vec<S> {
     atoms
 }
 
+#[derive(Debug, Clone)]
+pub struct TapeValidationError<S> {
+    pub path: Vec<String>,
+    pub left_out: Option<Vec<Monomial<S>>>,
+    pub right_in: Option<Vec<Monomial<S>>>,
+    pub left_tape: Option<String>,
+    pub right_tape: Option<String>,
+    pub full_tape: String,
+}
+
+impl<S: Debug + Display> fmt::Display for TapeValidationError<S> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let path = if self.path.is_empty() {
+            "<root>".to_string()
+        } else {
+            self.path.join(" -> ")
+        };
+        writeln!(f, "path: {}", path)?;
+        if let (Some(left), Some(right)) = (&self.left_out, &self.right_in) {
+            writeln!(f, "left outputs: {}", format_monomials(left))?;
+            writeln!(f, "right inputs: {}", format_monomials(right))?;
+        }
+        if let Some(left) = &self.left_tape {
+            writeln!(f, "left tape:\n{}", left)?;
+        }
+        if let Some(right) = &self.right_tape {
+            writeln!(f, "right tape:\n{}", right)?;
+        }
+        writeln!(f, "full tape:\n{}", self.full_tape)
+    }
+}
+
+fn validate_tape<S: Clone + PartialEq + Debug + Display, G: GeneratorTypes<S> + Display>(
+    tape: &Tape<S, G>,
+    path: &mut Vec<String>,
+) -> Result<(), TapeValidationError<S>> {
+    match tape {
+        Tape::Seq(left, right) => {
+            path.push("Seq.left".to_string());
+            validate_tape(left, path)?;
+            path.pop();
+            path.push("Seq.right".to_string());
+            validate_tape(right, path)?;
+            path.pop();
+
+            let (left_in, left_out) = left.io_types().ok_or_else(|| TapeValidationError {
+                path: path.clone(),
+                left_out: None,
+                right_in: None,
+                left_tape: Some(format_tape_tree(left, 0)),
+                right_tape: None,
+                full_tape: format_tape_tree(tape, 0),
+            })?;
+            let (right_in, right_out) = right.io_types().ok_or_else(|| TapeValidationError {
+                path: path.clone(),
+                left_out: None,
+                right_in: None,
+                left_tape: None,
+                right_tape: Some(format_tape_tree(right, 0)),
+                full_tape: format_tape_tree(tape, 0),
+            })?;
+
+            if left_out != right_in {
+                return Err(TapeValidationError {
+                    path: path.clone(),
+                    left_out: Some(left_out),
+                    right_in: Some(right_in),
+                    left_tape: Some(format_tape_tree(left, 0)),
+                    right_tape: Some(format_tape_tree(right, 0)),
+                    full_tape: format_tape_tree(tape, 0),
+                });
+            }
+            let _ = (left_in, right_out);
+            Ok(())
+        }
+        Tape::Sum(left, right) => {
+            path.push("Sum.left".to_string());
+            validate_tape(left, path)?;
+            path.pop();
+            path.push("Sum.right".to_string());
+            validate_tape(right, path)?;
+            path.pop();
+            Ok(())
+        }
+        Tape::Product(left, right) => {
+            path.push("Product.left".to_string());
+            validate_tape(left, path)?;
+            path.pop();
+            path.push("Product.right".to_string());
+            validate_tape(right, path)?;
+            path.pop();
+            Ok(())
+        }
+        Tape::EmbedCircuit(circuit) => {
+            if circuit.io_types().is_none() {
+                return Err(TapeValidationError {
+                    path: path.clone(),
+                    left_out: None,
+                    right_in: None,
+                    left_tape: None,
+                    right_tape: None,
+                    full_tape: format_tape_tree(tape, 0),
+                });
+            }
+            Ok(())
+        }
+        _ => Ok(()),
+    }
+}
+
+fn format_monomials<S: Display>(monos: &[Monomial<S>]) -> String {
+    if monos.is_empty() {
+        return "0".to_string();
+    }
+    let mut parts = Vec::with_capacity(monos.len());
+    for mono in monos {
+        parts.push(format!("{}", mono));
+    }
+    parts.join(" + ")
+}
+
+fn format_tape_tree<S: Clone + PartialEq + Display, G: GeneratorTypes<S> + Display>(
+    tape: &Tape<S, G>,
+    indent: usize,
+) -> String {
+    let pad = "  ".repeat(indent);
+    let io = tape.io_types().map(|(i, o)| {
+        format!(
+            " [in: {}, out: {}]",
+            format_monomials(&i),
+            format_monomials(&o)
+        )
+    });
+    let io = io.unwrap_or_else(|| " [in: ?, out: ?]".to_string());
+
+    match tape {
+        Tape::Id(mono) => format!("{}Id({}){}", pad, mono, io),
+        Tape::IdZero => format!("{}IdZero{}", pad, io),
+        Tape::EmbedCircuit(circuit) => format!("{}EmbedCircuit({}){}", pad, circuit, io),
+        Tape::Swap { left, right } => {
+            format!("{}Swap({}, {}){}", pad, left, right, io)
+        }
+        Tape::Discard(mono) => format!("{}Discard({}){}", pad, mono, io),
+        Tape::Split(mono) => format!("{}Split({}){}", pad, mono, io),
+        Tape::Create(mono) => format!("{}Create({}){}", pad, mono, io),
+        Tape::Merge(mono) => format!("{}Merge({}){}", pad, mono, io),
+        Tape::Seq(left, right) => format!(
+            "{}Seq{}\n{}\n{}",
+            pad,
+            io,
+            format_tape_tree(left, indent + 1),
+            format_tape_tree(right, indent + 1)
+        ),
+        Tape::Product(left, right) => format!(
+            "{}Product{}\n{}\n{}",
+            pad,
+            io,
+            format_tape_tree(left, indent + 1),
+            format_tape_tree(right, indent + 1)
+        ),
+        Tape::Sum(left, right) => format!(
+            "{}Sum{}\n{}\n{}",
+            pad,
+            io,
+            format_tape_tree(left, indent + 1),
+            format_tape_tree(right, indent + 1)
+        ),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -559,11 +739,18 @@ mod tests {
     }
 }
 
-impl<S: Clone + PartialEq, G: GeneratorShape + GeneratorTypes<S> + Clone> Tape<S, G> {
+impl<
+        S: Clone + PartialEq + Debug + Display,
+        G: GeneratorShape + GeneratorTypes<S> + Clone + Display,
+    > Tape<S, G>
+{
     pub fn to_hypergraph(
         &self,
         fresh_sort: &mut impl FnMut() -> S,
     ) -> OpenHypergraph<Monomial<S>, TapeEdge<S, G>> {
+        if let Err(err) = validate_tape(self, &mut Vec::new()) {
+            panic!("tape validation failed before to_hypergraph:\n{}", err);
+        }
         match self {
             Tape::Id(mono) => OpenHypergraph::identity(monomial_atoms(mono)),
             Tape::IdZero => OpenHypergraph::empty(),
