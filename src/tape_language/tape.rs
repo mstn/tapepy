@@ -194,6 +194,19 @@ impl<S: Clone + PartialEq + Display, G: GeneratorTypes<S>> Tape<S, G> {
     }
 }
 
+impl<S: Clone + PartialEq + Display, G: GeneratorTypes<S> + Clone> Tape<S, G> {
+    pub fn product_whisk(t1: &Tape<S, G>, t2: &Tape<S, G>) -> Tape<S, G> {
+        let (p1_in, _q1_out) = t1.io_types().expect("product_whisk requires io types");
+        let (_p2_in, q2_out) = t2.io_types().expect("product_whisk requires io types");
+        let p1 = Polynomial::from_monomials(p1_in);
+        let q2 = Polynomial::from_monomials(q2_out);
+
+        let left = t2.left_whisk(&p1);
+        let right = t1.right_whisk(&q2);
+        Tape::Seq(Box::new(left), Box::new(right))
+    }
+}
+
 pub trait Whisker<Rhs> {
     type Output;
 
@@ -212,7 +225,7 @@ impl<S: Clone, G: Clone> Tape<S, G> {
 
     pub fn right_whisk_poly(&self, poly: &Polynomial<S>) -> Tape<S, G>
     where
-        S: PartialEq,
+        S: PartialEq + Display,
         G: GeneratorTypes<S>,
     {
         let (head, rest) = split_polynomial(poly);
@@ -221,7 +234,7 @@ impl<S: Clone, G: Clone> Tape<S, G> {
         };
 
         if rest == Polynomial::zero() {
-            return self.right_whisk(&head);
+            return self.right_whisk_mono(&head);
         }
 
         let (inputs, outputs) = self
@@ -232,14 +245,10 @@ impl<S: Clone, G: Clone> Tape<S, G> {
 
         let left_dist = left_distributor(&left_poly, &Polynomial::monomial(head.clone()), &rest);
         let mid = Tape::Sum(
-            Box::new(self.right_whisk(&head)),
+            Box::new(self.right_whisk_mono(&head)),
             Box::new(self.right_whisk_poly(&rest)),
         );
-        let right_dist = inverse_left_distributor(
-            &right_poly,
-            &Polynomial::monomial(head),
-            &rest,
-        );
+        let right_dist = inverse_left_distributor(&right_poly, &Polynomial::monomial(head), &rest);
 
         Tape::Seq(
             Box::new(left_dist),
@@ -293,7 +302,7 @@ impl<S: Clone, G: Clone> Tape<S, G> {
         }
     }
 
-    pub fn right_whisk(&self, right: &Monomial<S>) -> Tape<S, G> {
+    fn right_whisk_mono(&self, right: &Monomial<S>) -> Tape<S, G> {
         match self {
             Tape::IdZero => Tape::IdZero,
             Tape::EmbedCircuit(circuit) => {
@@ -302,16 +311,16 @@ impl<S: Clone, G: Clone> Tape<S, G> {
                 Tape::EmbedCircuit(Box::new(whiskered))
             }
             Tape::Seq(head, tail) => Tape::Seq(
-                Box::new(head.right_whisk(right)),
-                Box::new(tail.right_whisk(right)),
+                Box::new(head.right_whisk_mono(right)),
+                Box::new(tail.right_whisk_mono(right)),
             ),
             Tape::Product(left_tape, right_tape) => Tape::Product(
-                Box::new(left_tape.right_whisk(right)),
-                Box::new(right_tape.right_whisk(right)),
+                Box::new(left_tape.right_whisk_mono(right)),
+                Box::new(right_tape.right_whisk_mono(right)),
             ),
             Tape::Sum(left_tape, right_tape) => Tape::Sum(
-                Box::new(left_tape.right_whisk(right)),
-                Box::new(right_tape.right_whisk(right)),
+                Box::new(left_tape.right_whisk_mono(right)),
+                Box::new(right_tape.right_whisk_mono(right)),
             ),
             Tape::Id(left) => Tape::Id(Monomial::product(left.clone(), right.clone())),
             Tape::Swap {
@@ -417,11 +426,13 @@ impl<S: Clone, G: Clone> Whisker<Monomial<S>> for Tape<S, G> {
     }
 
     fn right_whisk(&self, rhs: &Monomial<S>) -> Self::Output {
-        self.right_whisk(rhs)
+        self.right_whisk_mono(rhs)
     }
 }
 
-impl<S: Clone + PartialEq, G: GeneratorTypes<S> + Clone> Whisker<Polynomial<S>> for Tape<S, G> {
+impl<S: Clone + PartialEq + Display, G: GeneratorTypes<S> + Clone> Whisker<Polynomial<S>>
+    for Tape<S, G>
+{
     type Output = Tape<S, G>;
 
     fn left_whisk(&self, rhs: &Polynomial<S>) -> Self::Output {
