@@ -199,6 +199,25 @@ impl<S, G> Circuit<S, G> {
         acc
     }
 
+    pub fn swap_blocks(types_left: &[S], types_right: &[S]) -> Circuit<S, G>
+    where
+        S: Clone,
+    {
+        let mut types = Vec::with_capacity(types_left.len() + types_right.len());
+        types.extend_from_slice(types_left);
+        types.extend_from_slice(types_right);
+
+        let mut permutation = Vec::with_capacity(types.len());
+        for i in 0..types_right.len() {
+            permutation.push(types_left.len() + i);
+        }
+        for i in 0..types_left.len() {
+            permutation.push(i);
+        }
+
+        Circuit::permute_circuit(&types, &Permutation(permutation))
+    }
+
     pub fn wiring_circuit_for_context(
         context_entries: &[(String, S)],
         input_vars: &[String],

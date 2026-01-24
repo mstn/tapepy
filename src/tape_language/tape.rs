@@ -202,6 +202,14 @@ pub trait Whisker<Rhs> {
 }
 
 impl<S: Clone, G: Clone> Tape<S, G> {
+    pub fn left_distributor(
+        poly: &Polynomial<S>,
+        left: &Polynomial<S>,
+        right: &Polynomial<S>,
+    ) -> Tape<S, G> {
+        left_distributor(poly, left, right)
+    }
+
     fn left_whisk_poly(&self, poly: &Polynomial<S>) -> Tape<S, G> {
         match poly {
             Polynomial::Zero => Tape::IdZero,
@@ -276,14 +284,59 @@ impl<S: Clone, G: Clone> Tape<S, G> {
                 left: Monomial::product(swap_left.clone(), right.clone()),
                 right: Monomial::product(swap_right.clone(), right.clone()),
             },
-            Tape::Discard(left) => {
-                Tape::Discard(Monomial::product(left.clone(), right.clone()))
-            }
+            Tape::Discard(left) => Tape::Discard(Monomial::product(left.clone(), right.clone())),
             Tape::Split(left) => Tape::Split(Monomial::product(left.clone(), right.clone())),
             Tape::Create(left) => Tape::Create(Monomial::product(left.clone(), right.clone())),
             Tape::Merge(left) => Tape::Merge(Monomial::product(left.clone(), right.clone())),
         }
     }
+}
+
+pub fn left_distributor<S: Clone, G: Clone>(
+    poly: &Polynomial<S>,
+    left: &Polynomial<S>,
+    right: &Polynomial<S>,
+) -> Tape<S, G> {
+    let (head, rest) = split_polynomial(poly);
+    let Some(head) = head else {
+        return Tape::IdZero;
+    };
+
+    let sum_left_right = Polynomial::sum(left.clone(), right.clone());
+    let head_sum = monomial_times_poly(&head, &sum_left_right);
+    let left_part = Tape::Sum(
+        Box::new(id_poly(&head_sum)),
+        Box::new(left_distributor(&rest, left, right)),
+    );
+
+    let head_left = monomial_times_poly(&head, left);
+    let head_right = monomial_times_poly(&head, right);
+    let rest_left = Polynomial::product(rest.clone(), left.clone());
+    let rest_right = Polynomial::product(rest, right.clone());
+
+    let swap = swap_sum_blocks(&head_right, &rest_left);
+    let right_part = Tape::Sum(
+        Box::new(Tape::Sum(Box::new(id_poly(&head_left)), Box::new(swap))),
+        Box::new(id_poly(&rest_right)),
+    );
+
+    Tape::Seq(Box::new(left_part), Box::new(right_part))
+}
+
+pub fn swap_poly<S: Clone, G: Clone>(left: &Polynomial<S>, right: &Polynomial<S>) -> Tape<S, G> {
+    let (head, rest) = split_polynomial(right);
+    let Some(head) = head else {
+        return Tape::IdZero;
+    };
+
+    let head_poly = Polynomial::monomial(head.clone());
+    let rest_poly = rest;
+    let left_dist = left_distributor(left, &head_poly, &rest_poly);
+
+    let sum_swaps = sum_swaps(left, &head);
+    let right_part = Tape::Sum(Box::new(sum_swaps), Box::new(swap_poly(left, &rest_poly)));
+
+    Tape::Seq(Box::new(left_dist), Box::new(right_part))
 }
 
 impl<S: Clone, G: Clone> Whisker<Monomial<S>> for Tape<S, G> {
@@ -307,6 +360,121 @@ impl<S: Clone, G: Clone> Whisker<Polynomial<S>> for Tape<S, G> {
 
     fn right_whisk(&self, _: &Polynomial<S>) -> Self::Output {
         panic!("right whisking by a polynomial is not implemented");
+    }
+}
+
+fn polynomial_monomials<S: Clone>(poly: &Polynomial<S>) -> Vec<Monomial<S>> {
+    match poly {
+        Polynomial::Zero => Vec::new(),
+        Polynomial::Monomial(term) => vec![term.clone()],
+        Polynomial::Sum(left, right) => {
+            let mut terms = polynomial_monomials(left);
+            terms.extend(polynomial_monomials(right));
+            terms
+        }
+    }
+}
+
+fn split_polynomial<S: Clone>(poly: &Polynomial<S>) -> (Option<Monomial<S>>, Polynomial<S>) {
+    let mut terms = polynomial_monomials(poly);
+    if terms.is_empty() {
+        return (None, Polynomial::zero());
+    }
+    let head = terms.remove(0);
+    let rest = Polynomial::from_monomials(terms);
+    (Some(head), rest)
+}
+
+fn id_poly<S: Clone, G>(poly: &Polynomial<S>) -> Tape<S, G> {
+    let mut terms = polynomial_monomials(poly);
+    if terms.is_empty() {
+        return Tape::IdZero;
+    }
+    let mut acc = Tape::Id(terms.remove(0));
+    for term in terms {
+        acc = Tape::Sum(Box::new(acc), Box::new(Tape::Id(term)));
+    }
+    acc
+}
+
+fn monomial_times_poly<S: Clone>(mono: &Monomial<S>, poly: &Polynomial<S>) -> Polynomial<S> {
+    Polynomial::from_monomials(
+        polynomial_monomials(poly)
+            .into_iter()
+            .map(|term| Monomial::product(mono.clone(), term)),
+    )
+}
+
+fn sum_swaps<S: Clone, G>(poly: &Polynomial<S>, right: &Monomial<S>) -> Tape<S, G> {
+    let mut terms = polynomial_monomials(poly);
+    if terms.is_empty() {
+        return Tape::IdZero;
+    }
+    let right_types = monomial_atom_sorts(right);
+    let mut acc = {
+        let left_types = monomial_atom_sorts(&terms.remove(0));
+        Tape::EmbedCircuit(Box::new(Circuit::swap_blocks(&left_types, &right_types)))
+    };
+    for term in terms {
+        let left_types = monomial_atom_sorts(&term);
+        let swap = Tape::EmbedCircuit(Box::new(Circuit::swap_blocks(&left_types, &right_types)));
+        acc = Tape::Sum(Box::new(acc), Box::new(swap));
+    }
+    acc
+}
+
+fn swap_sum_blocks<S: Clone, G>(left: &Polynomial<S>, right: &Polynomial<S>) -> Tape<S, G> {
+    let left_types = polynomial_atom_sorts(left);
+    let right_types = polynomial_atom_sorts(right);
+    Tape::EmbedCircuit(Box::new(Circuit::swap_blocks(&left_types, &right_types)))
+}
+
+fn polynomial_atom_sorts<S: Clone>(poly: &Polynomial<S>) -> Vec<S> {
+    let mut atoms = Vec::new();
+    for term in polynomial_monomials(poly) {
+        atoms.extend(monomial_atom_sorts(&term));
+    }
+    atoms
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::expression_circuit::ExprGenerator;
+    use crate::types::TypeExpr;
+
+    fn atom(name: &str) -> Monomial<TypeExpr> {
+        Monomial::atom(TypeExpr::Named(name.to_string()))
+    }
+
+    #[test]
+    fn swap_sum_blocks_reorders_atoms() {
+        let u = atom("U");
+        let u2 = atom("U2");
+        let v = atom("V");
+        let w = atom("W");
+
+        let left = Polynomial::sum(
+            Polynomial::monomial(Monomial::product(u.clone(), v.clone())),
+            Polynomial::monomial(Monomial::product(u2.clone(), v.clone())),
+        );
+        let right = Polynomial::monomial(Monomial::product(u.clone(), w.clone()));
+
+        let tape: Tape<TypeExpr, ExprGenerator> = swap_sum_blocks(&left, &right);
+        let (inputs, outputs) = tape.io_types().expect("expected io types");
+
+        let expected_inputs = vec![
+            u.clone(),
+            v.clone(),
+            u2.clone(),
+            v.clone(),
+            u.clone(),
+            w.clone(),
+        ];
+        let expected_outputs = vec![u.clone(), w, u, v.clone(), u2, v.clone()];
+
+        assert_eq!(inputs, expected_inputs);
+        assert_eq!(outputs, expected_outputs);
     }
 }
 
