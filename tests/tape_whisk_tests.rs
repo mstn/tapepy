@@ -1,6 +1,6 @@
 use tapepy::expression_circuit::ExprGenerator;
 use tapepy::tape_language::circuit::Circuit;
-use tapepy::tape_language::{Monomial, Tape};
+use tapepy::tape_language::{Monomial, Tape, Whisker};
 use tapepy::types::TypeExpr;
 
 #[test]

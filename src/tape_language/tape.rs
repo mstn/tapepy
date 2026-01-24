@@ -1,7 +1,7 @@
 use open_hypergraphs::lax::{Arrow as _, Monoidal, OpenHypergraph};
 use std::fmt::{self, Display};
 
-use super::{compose_lax_unchecked, Circuit, GeneratorShape, GeneratorTypes, Monomial};
+use super::{compose_lax_unchecked, Circuit, GeneratorShape, GeneratorTypes, Monomial, Polynomial};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Tape<S, G> {
@@ -194,8 +194,26 @@ impl<S: Clone + PartialEq + Display, G: GeneratorTypes<S>> Tape<S, G> {
     }
 }
 
+pub trait Whisker<Rhs> {
+    type Output;
+
+    fn left_whisk(&self, rhs: &Rhs) -> Self::Output;
+    fn right_whisk(&self, rhs: &Rhs) -> Self::Output;
+}
+
 impl<S: Clone, G: Clone> Tape<S, G> {
-    pub fn left_whisk(&self, left: &Monomial<S>) -> Tape<S, G> {
+    fn left_whisk_poly(&self, poly: &Polynomial<S>) -> Tape<S, G> {
+        match poly {
+            Polynomial::Zero => Tape::IdZero,
+            Polynomial::Monomial(term) => self.left_whisk_mono(term),
+            Polynomial::Sum(left, right) => Tape::Sum(
+                Box::new(self.left_whisk_poly(left)),
+                Box::new(self.left_whisk_poly(right)),
+            ),
+        }
+    }
+
+    fn left_whisk_mono(&self, left: &Monomial<S>) -> Tape<S, G> {
         match self {
             Tape::IdZero => Tape::IdZero,
             Tape::EmbedCircuit(circuit) => {
@@ -204,16 +222,16 @@ impl<S: Clone, G: Clone> Tape<S, G> {
                 Tape::EmbedCircuit(Box::new(whiskered))
             }
             Tape::Seq(head, tail) => Tape::Seq(
-                Box::new(head.left_whisk(left)),
-                Box::new(tail.left_whisk(left)),
+                Box::new(head.left_whisk_mono(left)),
+                Box::new(tail.left_whisk_mono(left)),
             ),
             Tape::Product(left_tape, right_tape) => Tape::Product(
-                Box::new(left_tape.left_whisk(left)),
-                Box::new(right_tape.left_whisk(left)),
+                Box::new(left_tape.left_whisk_mono(left)),
+                Box::new(right_tape.left_whisk_mono(left)),
             ),
             Tape::Sum(left_tape, right_tape) => Tape::Sum(
-                Box::new(left_tape.left_whisk(left)),
-                Box::new(right_tape.left_whisk(left)),
+                Box::new(left_tape.left_whisk_mono(left)),
+                Box::new(right_tape.left_whisk_mono(left)),
             ),
             Tape::Id(right) => Tape::Id(Monomial::product(left.clone(), right.clone())),
             Tape::Swap {
@@ -265,6 +283,30 @@ impl<S: Clone, G: Clone> Tape<S, G> {
             Tape::Create(left) => Tape::Create(Monomial::product(left.clone(), right.clone())),
             Tape::Merge(left) => Tape::Merge(Monomial::product(left.clone(), right.clone())),
         }
+    }
+}
+
+impl<S: Clone, G: Clone> Whisker<Monomial<S>> for Tape<S, G> {
+    type Output = Tape<S, G>;
+
+    fn left_whisk(&self, rhs: &Monomial<S>) -> Self::Output {
+        self.left_whisk_mono(rhs)
+    }
+
+    fn right_whisk(&self, rhs: &Monomial<S>) -> Self::Output {
+        self.right_whisk(rhs)
+    }
+}
+
+impl<S: Clone, G: Clone> Whisker<Polynomial<S>> for Tape<S, G> {
+    type Output = Tape<S, G>;
+
+    fn left_whisk(&self, rhs: &Polynomial<S>) -> Self::Output {
+        self.left_whisk_poly(rhs)
+    }
+
+    fn right_whisk(&self, _: &Polynomial<S>) -> Self::Output {
+        panic!("right whisking by a polynomial is not implemented");
     }
 }
 
