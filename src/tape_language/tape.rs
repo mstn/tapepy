@@ -195,9 +195,9 @@ impl<S: Clone + PartialEq + Display, G: GeneratorTypes<S>> Tape<S, G> {
 }
 
 impl<S: Clone + PartialEq + Display, G: GeneratorTypes<S> + Clone> Tape<S, G> {
-    pub fn product_whisk(t1: &Tape<S, G>, t2: &Tape<S, G>) -> Tape<S, G> {
-        let (p1_in, _q1_out) = t1.io_types().expect("product_whisk requires io types");
-        let (_p2_in, q2_out) = t2.io_types().expect("product_whisk requires io types");
+    pub fn product(t1: &Tape<S, G>, t2: &Tape<S, G>) -> Tape<S, G> {
+        let (p1_in, _q1_out) = t1.io_types().expect("product requires io types");
+        let (_p2_in, q2_out) = t2.io_types().expect("product requires io types");
         let p1 = Polynomial::from_monomials(p1_in);
         let q2 = Polynomial::from_monomials(q2_out);
 

@@ -188,7 +188,7 @@ fn right_whisk_builds_expected_structure_and_types() {
 }
 
 #[test]
-fn tape_product_whisk_builds_expected_tape() {
+fn tape_product_builds_expected_tape() {
     let u_sort = TypeExpr::Named("U".to_string());
     let v_sort = TypeExpr::Named("V".to_string());
     let z_sort = TypeExpr::Named("Z".to_string());
@@ -261,7 +261,7 @@ fn tape_product_whisk_builds_expected_tape() {
         )
     };
 
-    let actual = Tape::product_whisk(&t1, &t2);
+    let actual = Tape::product(&t1, &t2);
 
     let left_whisk_u_t2 = {
         let id_u = Circuit::Id(u_sort.clone());

@@ -33,7 +33,7 @@ pub fn tape_from_predicate_with_negation(
                 let copy = Tape::copy_wires(Monomial::from_context(
                     &tree.judgment().context().entries(),
                 ));
-                let tensor = Tape::Product(Box::new(left), Box::new(right));
+                let tensor = Tape::product(&left, &right);
                 Tape::Seq(Box::new(copy), Box::new(tensor))
             }
             ("or", false) | ("and", true) => {

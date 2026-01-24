@@ -136,9 +136,10 @@ fn gate_tape(
         })
         .collect::<Vec<_>>();
     let copy = Tape::EmbedCircuit(Box::new(Circuit::copy_wires(context_types)));
+    let product = Tape::product(&pred_tape, &exec_tape);
     Tape::Seq(
         Box::new(copy),
-        Box::new(Tape::Product(Box::new(pred_tape), Box::new(exec_tape))),
+        Box::new(product),
     )
 }
 
