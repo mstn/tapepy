@@ -58,14 +58,21 @@ impl<S> Monomial<S> {
         Monomial::Atom(sort)
     }
 
+    pub fn from_sorts<I>(sorts: I) -> Self
+    where
+        I: IntoIterator<Item = S>,
+    {
+        sorts.into_iter().fold(Monomial::one(), |acc, sort| {
+            Monomial::product(acc, Monomial::atom(sort))
+        })
+    }
+
     /// Build a monomial from context entries; entry names are discarded.
     pub fn from_context(entries: &[(String, S)]) -> Self
     where
         S: Clone,
     {
-        entries.iter().fold(Monomial::one(), |acc, (_, ty)| {
-            Monomial::product(acc, Monomial::atom(ty.clone()))
-        })
+        Monomial::from_sorts(entries.iter().map(|(_, ty)| ty.clone()))
     }
 
     pub fn product(left: Monomial<S>, right: Monomial<S>) -> Self {
@@ -107,11 +114,54 @@ impl<S> Polynomial<S> {
         Polynomial::Monomial(term)
     }
 
+    pub fn from_monomial_sorts<I, J>(monomials: I) -> Self
+    where
+        I: IntoIterator<Item = J>,
+        J: IntoIterator<Item = S>,
+    {
+        monomials
+            .into_iter()
+            .map(Monomial::from_sorts)
+            .map(Polynomial::monomial)
+            .fold(Polynomial::zero(), Polynomial::sum)
+    }
+
+    pub fn product(left: Polynomial<S>, right: Polynomial<S>) -> Self
+    where
+        S: Clone,
+    {
+        let left_terms = Polynomial::into_monomials(left);
+        let right_terms = Polynomial::into_monomials(right);
+        if left_terms.is_empty() || right_terms.is_empty() {
+            return Polynomial::zero();
+        }
+        let mut acc = Polynomial::zero();
+        for lhs in left_terms {
+            for rhs in right_terms.iter().cloned() {
+                let term = Monomial::product(lhs.clone(), rhs);
+                acc = Polynomial::sum(acc, Polynomial::monomial(term));
+            }
+        }
+        acc
+    }
+
     pub fn sum(left: Polynomial<S>, right: Polynomial<S>) -> Self {
         match (left, right) {
             (Polynomial::Zero, right) => right,
             (left, Polynomial::Zero) => left,
             (left, right) => Polynomial::Sum(Box::new(left), Box::new(right)),
+        }
+    }
+
+    fn into_monomials(poly: Polynomial<S>) -> Vec<Monomial<S>> {
+        match poly {
+            Polynomial::Zero => Vec::new(),
+            Polynomial::Monomial(term) => vec![term],
+            Polynomial::Sum(left, right) => {
+                let mut terms = Polynomial::into_monomials(*left);
+                terms.extend(Polynomial::into_monomials(*right));
+                terms
+            }
         }
     }
 }
