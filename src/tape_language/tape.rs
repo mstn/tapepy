@@ -229,6 +229,43 @@ impl<S: Clone, G: Clone> Tape<S, G> {
             Tape::Merge(right) => Tape::Merge(Monomial::product(left.clone(), right.clone())),
         }
     }
+
+    pub fn right_whisk(&self, right: &Monomial<S>) -> Tape<S, G> {
+        match self {
+            Tape::IdZero => Tape::IdZero,
+            Tape::EmbedCircuit(circuit) => {
+                let id_right = Circuit::id(monomial_atom_sorts(right));
+                let whiskered = Circuit::product(circuit.as_ref().clone(), id_right);
+                Tape::EmbedCircuit(Box::new(whiskered))
+            }
+            Tape::Seq(head, tail) => Tape::Seq(
+                Box::new(head.right_whisk(right)),
+                Box::new(tail.right_whisk(right)),
+            ),
+            Tape::Product(left_tape, right_tape) => Tape::Product(
+                Box::new(left_tape.right_whisk(right)),
+                Box::new(right_tape.right_whisk(right)),
+            ),
+            Tape::Sum(left_tape, right_tape) => Tape::Sum(
+                Box::new(left_tape.right_whisk(right)),
+                Box::new(right_tape.right_whisk(right)),
+            ),
+            Tape::Id(left) => Tape::Id(Monomial::product(left.clone(), right.clone())),
+            Tape::Swap {
+                left: swap_left,
+                right: swap_right,
+            } => Tape::Swap {
+                left: Monomial::product(swap_left.clone(), right.clone()),
+                right: Monomial::product(swap_right.clone(), right.clone()),
+            },
+            Tape::Discard(left) => {
+                Tape::Discard(Monomial::product(left.clone(), right.clone()))
+            }
+            Tape::Split(left) => Tape::Split(Monomial::product(left.clone(), right.clone())),
+            Tape::Create(left) => Tape::Create(Monomial::product(left.clone(), right.clone())),
+            Tape::Merge(left) => Tape::Merge(Monomial::product(left.clone(), right.clone())),
+        }
+    }
 }
 
 impl<S: Clone + PartialEq, G: GeneratorShape + GeneratorTypes<S> + Clone> Tape<S, G> {
