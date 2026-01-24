@@ -321,91 +321,472 @@ fn nested_ifs_with_assignments_and_complex_conditions() {
     let y_plus_three_ty = TypeExpr::Int;
     let types = vec![x_ty.clone(), y_ty.clone()];
 
-    let y_plus_one = expr_with_context(
+    let const_one = Circuit::Generator(ExprGenerator::Function {
+        name: "1".to_string(),
+        input_types: Vec::new(),
+        output_types: vec![TypeExpr::Int],
+    });
+    let const_two = Circuit::Generator(ExprGenerator::Function {
+        name: "2".to_string(),
+        input_types: Vec::new(),
+        output_types: vec![TypeExpr::Int],
+    });
+    let const_three = Circuit::Generator(ExprGenerator::Function {
+        name: "3".to_string(),
+        input_types: Vec::new(),
+        output_types: vec![TypeExpr::Int],
+    });
+
+    let y_plus_one = Circuit::seq(
         Circuit::product(Circuit::Discard(x_ty.clone()), Circuit::Id(y_ty.clone())),
-        expr_binop(
-            "+",
-            Circuit::Id(y_ty.clone()),
-            expr_const("1"),
-            y_ty.clone(),
-            TypeExpr::Int,
-            y_plus_one_ty.clone(),
+        Circuit::seq(
+            Circuit::product(Circuit::Id(y_ty.clone()), const_one),
+            Circuit::Generator(ExprGenerator::Function {
+                name: "+".to_string(),
+                input_types: vec![y_ty.clone(), TypeExpr::Int],
+                output_types: vec![y_plus_one_ty.clone()],
+            }),
         ),
     );
-    let x_plus_y = expr_with_context(
+    let x_plus_y = Circuit::seq(
         Circuit::product(Circuit::Id(x_ty.clone()), Circuit::Id(y_ty.clone())),
-        expr_binop(
-            "+",
-            Circuit::Id(x_ty.clone()),
-            Circuit::Id(y_ty.clone()),
-            x_ty.clone(),
-            y_ty.clone(),
-            x_plus_y_ty.clone(),
+        Circuit::seq(
+            Circuit::product(Circuit::Id(x_ty.clone()), Circuit::Id(y_ty.clone())),
+            Circuit::Generator(ExprGenerator::Function {
+                name: "+".to_string(),
+                input_types: vec![x_ty.clone(), y_ty.clone()],
+                output_types: vec![x_plus_y_ty.clone()],
+            }),
         ),
     );
-    let x_plus_two = expr_with_context(
+    let x_plus_two = Circuit::seq(
         Circuit::product(Circuit::Id(x_ty.clone()), Circuit::Discard(y_ty.clone())),
-        expr_binop(
-            "+",
-            Circuit::Id(x_ty.clone()),
-            expr_const("2"),
-            x_ty.clone(),
-            TypeExpr::Int,
-            x_plus_two_ty.clone(),
+        Circuit::seq(
+            Circuit::product(Circuit::Id(x_ty.clone()), const_two),
+            Circuit::Generator(ExprGenerator::Function {
+                name: "+".to_string(),
+                input_types: vec![x_ty.clone(), TypeExpr::Int],
+                output_types: vec![x_plus_two_ty.clone()],
+            }),
         ),
     );
-    let y_plus_three = expr_with_context(
+    let y_plus_three = Circuit::seq(
         Circuit::product(Circuit::Discard(x_ty.clone()), Circuit::Id(y_ty.clone())),
-        expr_binop(
-            "+",
-            Circuit::Id(y_ty.clone()),
-            expr_const("3"),
-            y_ty.clone(),
-            TypeExpr::Int,
-            y_plus_three_ty.clone(),
+        Circuit::seq(
+            Circuit::product(Circuit::Id(y_ty.clone()), const_three),
+            Circuit::Generator(ExprGenerator::Function {
+                name: "+".to_string(),
+                input_types: vec![y_ty.clone(), TypeExpr::Int],
+                output_types: vec![y_plus_three_ty.clone()],
+            }),
         ),
     );
 
-    let assign_y_plus_one = assign_circuit_x(&x_ty, &y_ty, y_plus_one);
-    let assign_x_plus_y = assign_circuit_x(&x_ty, &y_ty, x_plus_y);
-    let assign_x_plus_two = assign_circuit_x(&x_ty, &y_ty, x_plus_two);
-    let assign_y_plus_three = assign_circuit_x(&x_ty, &y_ty, y_plus_three);
+    let assign_y_plus_one = Circuit::seq(
+        Circuit::product(Circuit::Id(x_ty.clone()), Circuit::Copy(y_ty.clone())),
+        Circuit::product(y_plus_one, Circuit::Id(y_ty.clone())),
+    );
+    let assign_x_plus_y = Circuit::seq(
+        Circuit::product(Circuit::Id(x_ty.clone()), Circuit::Copy(y_ty.clone())),
+        Circuit::product(x_plus_y, Circuit::Id(y_ty.clone())),
+    );
+    let assign_x_plus_two = Circuit::seq(
+        Circuit::product(Circuit::Id(x_ty.clone()), Circuit::Copy(y_ty.clone())),
+        Circuit::product(x_plus_two, Circuit::Id(y_ty.clone())),
+    );
+    let assign_y_plus_three = Circuit::seq(
+        Circuit::product(Circuit::Id(x_ty.clone()), Circuit::Copy(y_ty.clone())),
+        Circuit::product(y_plus_three, Circuit::Id(y_ty.clone())),
+    );
 
     match tape {
         Tape::Seq(copy, tail) => {
-            assert_copy_wires_tape(&copy, &types);
+            match *copy {
+                Tape::EmbedCircuit(circuit) => {
+                    assert_eq!(*circuit, Circuit::copy_wires(types.clone()));
+                }
+                _ => panic!("expected embedded copy circuit for outer if"),
+            }
             match *tail {
                 Tape::Seq(branches, join) => {
-                    assert_join_wires_tape(&join, &types);
+                    match *join {
+                        Tape::EmbedCircuit(circuit) => {
+                            assert_eq!(*circuit, Circuit::join_wires(types.clone()));
+                        }
+                        _ => panic!("expected embedded join circuit for outer if"),
+                    }
                     match *branches {
                         Tape::Sum(left, right) => {
-                            assert_gate_tape(
-                                &left,
-                                &types,
-                                vec![x_ty.clone(), y_ty.clone()],
-                                false,
-                            );
-                            assert_gate_tape(
-                                &right,
-                                &types,
-                                vec![x_ty.clone(), y_ty.clone()],
-                                true,
-                            );
+                            let left_exec = match *left {
+                                Tape::Seq(copy, prod) => {
+                                    match *copy {
+                                        Tape::EmbedCircuit(circuit) => {
+                                            assert_eq!(*circuit, Circuit::copy_wires(types.clone()));
+                                        }
+                                        _ => panic!("expected embedded copy circuit for left gate"),
+                                    }
+                                    match *prod {
+                                        Tape::Product(pred, exec) => {
+                                            match *pred {
+                                                Tape::EmbedCircuit(circuit) => match *circuit {
+                                                    Circuit::Seq(_, op) => match *op {
+                                                        Circuit::Generator(ExprGenerator::Predicate {
+                                                            name,
+                                                            input_types,
+                                                            negated,
+                                                        }) => {
+                                                            assert_eq!(name, ">");
+                                                            assert!(!negated);
+                                                            assert_eq!(
+                                                                input_types,
+                                                                vec![x_ty.clone(), y_ty.clone()]
+                                                            );
+                                                        }
+                                                        _ => panic!("expected predicate generator"),
+                                                    },
+                                                    _ => panic!("expected seq in predicate circuit"),
+                                                },
+                                                _ => panic!("expected embedded predicate circuit"),
+                                            }
+                                            exec
+                                        }
+                                        _ => panic!("expected product in left gate"),
+                                    }
+                                }
+                                _ => panic!("expected seq in left gate"),
+                            };
 
-                            assert_nested_if(
-                                &left,
-                                &types,
-                                vec![sum_xy_ty.clone(), TypeExpr::Int],
-                                assign_y_plus_one,
-                                assign_x_plus_y,
-                            );
-                            assert_nested_if(
-                                &right,
-                                &types,
-                                vec![y_ty.clone(), x_ty.clone()],
-                                assign_x_plus_two,
-                                assign_y_plus_three,
-                            );
+                            let right_exec = match *right {
+                                Tape::Seq(copy, prod) => {
+                                    match *copy {
+                                        Tape::EmbedCircuit(circuit) => {
+                                            assert_eq!(*circuit, Circuit::copy_wires(types.clone()));
+                                        }
+                                        _ => panic!("expected embedded copy circuit for right gate"),
+                                    }
+                                    match *prod {
+                                        Tape::Product(pred, exec) => {
+                                            match *pred {
+                                                Tape::EmbedCircuit(circuit) => match *circuit {
+                                                    Circuit::Seq(_, op) => match *op {
+                                                        Circuit::Generator(ExprGenerator::Predicate {
+                                                            name,
+                                                            input_types,
+                                                            negated,
+                                                        }) => {
+                                                            assert_eq!(name, ">");
+                                                            assert!(negated);
+                                                            assert_eq!(
+                                                                input_types,
+                                                                vec![x_ty.clone(), y_ty.clone()]
+                                                            );
+                                                        }
+                                                        _ => panic!("expected predicate generator"),
+                                                    },
+                                                    _ => panic!("expected seq in predicate circuit"),
+                                                },
+                                                _ => panic!("expected embedded predicate circuit"),
+                                            }
+                                            exec
+                                        }
+                                        _ => panic!("expected product in right gate"),
+                                    }
+                                }
+                                _ => panic!("expected seq in right gate"),
+                            };
+
+                            let left_inner = match *left_exec {
+                                Tape::Seq(copy, tail) => {
+                                    match *copy {
+                                        Tape::EmbedCircuit(circuit) => {
+                                            assert_eq!(*circuit, Circuit::copy_wires(types.clone()));
+                                        }
+                                        _ => panic!("expected embedded copy circuit for left inner if"),
+                                    }
+                                    match *tail {
+                                        Tape::Seq(branches, join) => {
+                                            match *join {
+                                                Tape::EmbedCircuit(circuit) => {
+                                                    assert_eq!(*circuit, Circuit::join_wires(types.clone()));
+                                                }
+                                                _ => panic!("expected embedded join circuit for left inner if"),
+                                            }
+                                            match *branches {
+                                                Tape::Sum(left_branch, right_branch) => {
+                                                    match *left_branch {
+                                                        Tape::Seq(copy, prod) => {
+                                                            match *copy {
+                                                                Tape::EmbedCircuit(circuit) => {
+                                                                    assert_eq!(
+                                                                        *circuit,
+                                                                        Circuit::copy_wires(types.clone())
+                                                                    );
+                                                                }
+                                                                _ => panic!("expected copy circuit in left inner gate"),
+                                                            }
+                                                            match *prod {
+                                                                Tape::Product(pred, exec) => {
+                                                                    match *pred {
+                                                                        Tape::EmbedCircuit(circuit) => match *circuit {
+                                                                            Circuit::Seq(_, op) => match *op {
+                                                                                Circuit::Generator(
+                                                                                    ExprGenerator::Predicate {
+                                                                                        name,
+                                                                                        input_types,
+                                                                                        negated,
+                                                                                    },
+                                                                                ) => {
+                                                                                    assert_eq!(name, ">");
+                                                                                    assert!(!negated);
+                                                                                    assert_eq!(
+                                                                                        input_types,
+                                                                                        vec![sum_xy_ty.clone(), TypeExpr::Int]
+                                                                                    );
+                                                                                }
+                                                                                _ => panic!(
+                                                                                    "expected predicate generator in left inner"
+                                                                                ),
+                                                                            },
+                                                                            _ => panic!("expected seq in left inner predicate"),
+                                                                        },
+                                                                        _ => panic!("expected embedded predicate in left inner"),
+                                                                    }
+                                                                    match *exec {
+                                                                        Tape::EmbedCircuit(circuit) => {
+                                                                            assert_eq!(*circuit, assign_y_plus_one);
+                                                                        }
+                                                                        _ => panic!(
+                                                                            "expected embedded assignment in left inner"
+                                                                        ),
+                                                                    }
+                                                                }
+                                                                _ => panic!("expected product in left inner gate"),
+                                                            }
+                                                        }
+                                                        _ => panic!("expected seq in left inner gate"),
+                                                    }
+
+                                                    match *right_branch {
+                                                        Tape::Seq(copy, prod) => {
+                                                            match *copy {
+                                                                Tape::EmbedCircuit(circuit) => {
+                                                                    assert_eq!(
+                                                                        *circuit,
+                                                                        Circuit::copy_wires(types.clone())
+                                                                    );
+                                                                }
+                                                                _ => panic!(
+                                                                    "expected copy circuit in right inner gate"
+                                                                ),
+                                                            }
+                                                            match *prod {
+                                                                Tape::Product(pred, exec) => {
+                                                                    match *pred {
+                                                                        Tape::EmbedCircuit(circuit) => match *circuit {
+                                                                            Circuit::Seq(_, op) => match *op {
+                                                                                Circuit::Generator(
+                                                                                    ExprGenerator::Predicate {
+                                                                                        name,
+                                                                                        input_types,
+                                                                                        negated,
+                                                                                    },
+                                                                                ) => {
+                                                                                    assert_eq!(name, ">");
+                                                                                    assert!(negated);
+                                                                                    assert_eq!(
+                                                                                        input_types,
+                                                                                        vec![sum_xy_ty.clone(), TypeExpr::Int]
+                                                                                    );
+                                                                                }
+                                                                                _ => panic!(
+                                                                                    "expected predicate generator in right inner"
+                                                                                ),
+                                                                            },
+                                                                            _ => panic!("expected seq in right inner predicate"),
+                                                                        },
+                                                                        _ => {
+                                                                            panic!("expected embedded predicate in right inner")
+                                                                        }
+                                                                    }
+                                                                    match *exec {
+                                                                        Tape::EmbedCircuit(circuit) => {
+                                                                            assert_eq!(*circuit, assign_x_plus_y);
+                                                                        }
+                                                                        _ => panic!(
+                                                                            "expected embedded assignment in right inner"
+                                                                        ),
+                                                                    }
+                                                                }
+                                                                _ => panic!("expected product in right inner gate"),
+                                                            }
+                                                        }
+                                                        _ => panic!("expected seq in right inner gate"),
+                                                    }
+                                                }
+                                                _ => panic!("expected sum in left inner if"),
+                                            }
+                                        }
+                                        _ => panic!("expected seq in left inner if"),
+                                    }
+                                }
+                                _ => panic!("expected seq in left inner if"),
+                            };
+                            drop(left_inner);
+
+                            let right_inner = match *right_exec {
+                                Tape::Seq(copy, tail) => {
+                                    match *copy {
+                                        Tape::EmbedCircuit(circuit) => {
+                                            assert_eq!(*circuit, Circuit::copy_wires(types.clone()));
+                                        }
+                                        _ => panic!("expected embedded copy circuit for right inner if"),
+                                    }
+                                    match *tail {
+                                        Tape::Seq(branches, join) => {
+                                            match *join {
+                                                Tape::EmbedCircuit(circuit) => {
+                                                    assert_eq!(*circuit, Circuit::join_wires(types.clone()));
+                                                }
+                                                _ => panic!("expected embedded join circuit for right inner if"),
+                                            }
+                                            match *branches {
+                                                Tape::Sum(left_branch, right_branch) => {
+                                                    match *left_branch {
+                                                        Tape::Seq(copy, prod) => {
+                                                            match *copy {
+                                                                Tape::EmbedCircuit(circuit) => {
+                                                                    assert_eq!(
+                                                                        *circuit,
+                                                                        Circuit::copy_wires(types.clone())
+                                                                    );
+                                                                }
+                                                                _ => panic!(
+                                                                    "expected copy circuit in left inner gate (right exec)"
+                                                                ),
+                                                            }
+                                                            match *prod {
+                                                                Tape::Product(pred, exec) => {
+                                                                    match *pred {
+                                                                        Tape::EmbedCircuit(circuit) => match *circuit {
+                                                                            Circuit::Seq(_, op) => match *op {
+                                                                                Circuit::Generator(
+                                                                                    ExprGenerator::Predicate {
+                                                                                        name,
+                                                                                        input_types,
+                                                                                        negated,
+                                                                                    },
+                                                                                ) => {
+                                                                                    assert_eq!(name, ">");
+                                                                                    assert!(!negated);
+                                                                                    assert_eq!(
+                                                                                        input_types,
+                                                                                        vec![y_ty.clone(), x_ty.clone()]
+                                                                                    );
+                                                                                }
+                                                                                _ => panic!(
+                                                                                    "expected predicate generator in right-inner-left"
+                                                                                ),
+                                                                            },
+                                                                            _ => panic!("expected seq in right-inner-left predicate"),
+                                                                        },
+                                                                        _ => panic!(
+                                                                            "expected embedded predicate in right-inner-left"
+                                                                        ),
+                                                                    }
+                                                                    match *exec {
+                                                                        Tape::EmbedCircuit(circuit) => {
+                                                                            assert_eq!(*circuit, assign_x_plus_two);
+                                                                        }
+                                                                        _ => panic!(
+                                                                            "expected embedded assignment in right-inner-left"
+                                                                        ),
+                                                                    }
+                                                                }
+                                                                _ => panic!(
+                                                                    "expected product in right-inner-left gate"
+                                                                ),
+                                                            }
+                                                        }
+                                                        _ => panic!(
+                                                            "expected seq in right-inner-left gate"
+                                                        ),
+                                                    }
+
+                                                    match *right_branch {
+                                                        Tape::Seq(copy, prod) => {
+                                                            match *copy {
+                                                                Tape::EmbedCircuit(circuit) => {
+                                                                    assert_eq!(
+                                                                        *circuit,
+                                                                        Circuit::copy_wires(types.clone())
+                                                                    );
+                                                                }
+                                                                _ => panic!(
+                                                                    "expected copy circuit in right-inner-right gate"
+                                                                ),
+                                                            }
+                                                            match *prod {
+                                                                Tape::Product(pred, exec) => {
+                                                                    match *pred {
+                                                                        Tape::EmbedCircuit(circuit) => match *circuit {
+                                                                            Circuit::Seq(_, op) => match *op {
+                                                                                Circuit::Generator(
+                                                                                    ExprGenerator::Predicate {
+                                                                                        name,
+                                                                                        input_types,
+                                                                                        negated,
+                                                                                    },
+                                                                                ) => {
+                                                                                    assert_eq!(name, ">");
+                                                                                    assert!(negated);
+                                                                                    assert_eq!(
+                                                                                        input_types,
+                                                                                        vec![y_ty.clone(), x_ty.clone()]
+                                                                                    );
+                                                                                }
+                                                                                _ => panic!(
+                                                                                    "expected predicate generator in right-inner-right"
+                                                                                ),
+                                                                            },
+                                                                            _ => panic!(
+                                                                                "expected seq in right-inner-right predicate"
+                                                                            ),
+                                                                        },
+                                                                        _ => panic!(
+                                                                            "expected embedded predicate in right-inner-right"
+                                                                        ),
+                                                                    }
+                                                                    match *exec {
+                                                                        Tape::EmbedCircuit(circuit) => {
+                                                                            assert_eq!(
+                                                                                *circuit,
+                                                                                assign_y_plus_three
+                                                                            );
+                                                                        }
+                                                                        _ => panic!(
+                                                                            "expected embedded assignment in right-inner-right"
+                                                                        ),
+                                                                    }
+                                                                }
+                                                                _ => panic!(
+                                                                    "expected product in right-inner-right gate"
+                                                                ),
+                                                            }
+                                                        }
+                                                        _ => panic!(
+                                                            "expected seq in right-inner-right gate"
+                                                        ),
+                                                    }
+                                                }
+                                                _ => panic!("expected sum in right inner if"),
+                                            }
+                                        }
+                                        _ => panic!("expected seq in right inner if"),
+                                    }
+                                }
+                                _ => panic!("expected seq in right inner if"),
+                            };
+                            drop(right_inner);
                         }
                         _ => panic!("expected sum of branches for outer if"),
                     }

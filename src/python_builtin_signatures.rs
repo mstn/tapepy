@@ -1,4 +1,4 @@
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct TypeVar(pub &'static str);
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]

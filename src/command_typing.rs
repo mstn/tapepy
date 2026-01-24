@@ -5,7 +5,7 @@ use rustpython_parser::ast::{Expr, ExprName, Stmt, StmtAssign, StmtIf, StmtWhile
 use crate::context::Context;
 use crate::types::TypeExpr;
 use crate::typing::{
-    infer_expression_in_context, infer_predicate_in_context, reset_fresh_type_vars,
+    infer_expression_in_context_with_state, infer_predicate_in_context_with_state, InferenceState,
     ConstraintStore, ContextSnapshot, DeductionTree,
 };
 
@@ -120,11 +120,15 @@ pub fn infer_command_from_suite(stmts: &[Stmt]) -> CommandDerivationTree {
     for stmt in stmts {
         collect_free_vars_stmt(stmt, &mut context);
     }
-    reset_fresh_type_vars(context.entries().len());
-    infer_block(stmts, &context).0
+    let mut state = InferenceState::new(context.entries().len());
+    infer_block(stmts, &context, &mut state).0
 }
 
-pub fn infer_command(stmt: &Stmt, context: &Context) -> (CommandDerivationTree, Context) {
+pub fn infer_command(
+    stmt: &Stmt,
+    context: &Context,
+    state: &mut InferenceState,
+) -> (CommandDerivationTree, Context) {
     match stmt {
         Stmt::Pass(_) => (
             make_leaf("Skip", context, "skip".to_string(), CommandForm::Skip),
@@ -134,9 +138,9 @@ pub fn infer_command(stmt: &Stmt, context: &Context) -> (CommandDerivationTree, 
             make_leaf("Abort", context, "abort".to_string(), CommandForm::Abort),
             context.clone(),
         ),
-        Stmt::Assign(assign) => infer_assign(assign, context),
-        Stmt::If(if_stmt) => infer_if(if_stmt, context),
-        Stmt::While(while_stmt) => infer_while(while_stmt, context),
+        Stmt::Assign(assign) => infer_assign(assign, context, state),
+        Stmt::If(if_stmt) => infer_if(if_stmt, context, state),
+        Stmt::While(while_stmt) => infer_while(while_stmt, context, state),
         Stmt::Expr(expr_stmt) => {
             panic!("unsupported command expression: {:?}", expr_stmt)
         }
@@ -144,7 +148,11 @@ pub fn infer_command(stmt: &Stmt, context: &Context) -> (CommandDerivationTree, 
     }
 }
 
-fn infer_assign(assign: &StmtAssign, context: &Context) -> (CommandDerivationTree, Context) {
+fn infer_assign(
+    assign: &StmtAssign,
+    context: &Context,
+    state: &mut InferenceState,
+) -> (CommandDerivationTree, Context) {
     if assign.targets.len() != 1 {
         panic!("assignment expects a single target");
     }
@@ -158,7 +166,7 @@ fn infer_assign(assign: &StmtAssign, context: &Context) -> (CommandDerivationTre
         .cloned()
         .unwrap_or_else(|| panic!("assignment target `{}` not in context", target_name));
 
-    let expr_tree = infer_expression_in_context(&assign.value, context);
+    let expr_tree = infer_expression_in_context_with_state(&assign.value, context, state);
     let cmd = format!("{} := {}", target_name, expr_tree.judgment().expr());
     (
         make_node(
@@ -172,14 +180,18 @@ fn infer_assign(assign: &StmtAssign, context: &Context) -> (CommandDerivationTre
     )
 }
 
-fn infer_if(if_stmt: &StmtIf, context: &Context) -> (CommandDerivationTree, Context) {
-    let pred_tree = infer_predicate_in_context(&if_stmt.test, context);
+fn infer_if(
+    if_stmt: &StmtIf,
+    context: &Context,
+    state: &mut InferenceState,
+) -> (CommandDerivationTree, Context) {
+    let pred_tree = infer_predicate_in_context_with_state(&if_stmt.test, context, state);
     if pred_tree.judgment().ty() != &TypeExpr::Bool {
         panic!("type error: if predicate must have type Bool");
     }
 
-    let (then_tree, then_context) = infer_block(&if_stmt.body, context);
-    let (else_tree, else_context) = infer_block(&if_stmt.orelse, context);
+    let (then_tree, then_context) = infer_block(&if_stmt.body, context, state);
+    let (else_tree, else_context) = infer_block(&if_stmt.orelse, context, state);
     let merged_context = merge_contexts(context, &then_context, &else_context);
     let cmd = format!("if {} then ... else ...", pred_tree.judgment().expr());
     (
@@ -198,13 +210,17 @@ fn infer_if(if_stmt: &StmtIf, context: &Context) -> (CommandDerivationTree, Cont
     )
 }
 
-fn infer_while(while_stmt: &StmtWhile, context: &Context) -> (CommandDerivationTree, Context) {
-    let pred_tree = infer_predicate_in_context(&while_stmt.test, context);
+fn infer_while(
+    while_stmt: &StmtWhile,
+    context: &Context,
+    state: &mut InferenceState,
+) -> (CommandDerivationTree, Context) {
+    let pred_tree = infer_predicate_in_context_with_state(&while_stmt.test, context, state);
     if pred_tree.judgment().ty() != &TypeExpr::Bool {
         panic!("type error: while predicate must have type Bool");
     }
 
-    let (body_tree, body_context) = infer_block(&while_stmt.body, context);
+    let (body_tree, body_context) = infer_block(&while_stmt.body, context, state);
     ensure_context_unchanged(context, &body_context);
     let cmd = format!("while {} do ...", pred_tree.judgment().expr());
     (
@@ -222,7 +238,11 @@ fn infer_while(while_stmt: &StmtWhile, context: &Context) -> (CommandDerivationT
     )
 }
 
-fn infer_block(stmts: &[Stmt], context: &Context) -> (CommandDerivationTree, Context) {
+fn infer_block(
+    stmts: &[Stmt],
+    context: &Context,
+    state: &mut InferenceState,
+) -> (CommandDerivationTree, Context) {
     if stmts.is_empty() {
         return (
             make_leaf("Skip", context, "skip".to_string(), CommandForm::Skip),
@@ -231,9 +251,9 @@ fn infer_block(stmts: &[Stmt], context: &Context) -> (CommandDerivationTree, Con
     }
 
     let mut iter = stmts.iter();
-    let (mut acc_tree, mut acc_context) = infer_command(iter.next().unwrap(), context);
+    let (mut acc_tree, mut acc_context) = infer_command(iter.next().unwrap(), context, state);
     for stmt in iter {
-        let (next_tree, next_context) = infer_command(stmt, &acc_context);
+        let (next_tree, next_context) = infer_command(stmt, &acc_context, state);
         acc_tree = make_node(
             "Seq",
             &next_context,

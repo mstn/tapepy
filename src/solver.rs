@@ -1,4 +1,4 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 
 use open_hypergraphs::lax::OpenHypergraph;
@@ -7,7 +7,7 @@ use crate::types::{TypeConstraint, TypeExpr, TypeVar};
 
 #[derive(Debug, Clone)]
 pub struct TypeSubstitution {
-    mapping: HashMap<TypeVar, TypeExpr>,
+    mapping: BTreeMap<TypeVar, TypeExpr>,
 }
 
 impl TypeSubstitution {
@@ -61,7 +61,7 @@ pub fn solve_hypergraph_types<A: Clone>(
     let vars_list: Vec<TypeVar> = vars.into_iter().collect();
     let choices = collect_choices(graph);
 
-    let mut assignment = HashMap::new();
+    let mut assignment = BTreeMap::new();
     if backtrack_solve(
         &vars_list,
         0,
@@ -82,7 +82,7 @@ pub fn solve_type_equations(
     nodes: &[TypeExpr],
     constraints: &[TypeConstraint],
 ) -> Result<TypeSubstitution, SolveError> {
-    let mut vars = HashSet::new();
+    let mut vars = BTreeSet::new();
     for expr in nodes {
         collect_vars_expr(expr, &mut vars);
     }
@@ -111,7 +111,7 @@ pub fn solve_type_equations(
         TypeExpr::Int,
         TypeExpr::Float,
     ];
-    let mut named = HashSet::new();
+    let mut named = BTreeSet::new();
     for expr in nodes {
         collect_named_expr(expr, &mut named);
     }
@@ -139,7 +139,7 @@ pub fn solve_type_equations(
     let mut graph: OpenHypergraph<TypeExpr, ()> = OpenHypergraph::empty();
     graph.hypergraph.nodes = nodes.to_vec();
 
-    let mut assignment = HashMap::new();
+    let mut assignment = BTreeMap::new();
     if backtrack_solve(
         &vars_list,
         0,
@@ -163,15 +163,15 @@ pub fn apply_substitution<A: Clone>(
     graph.clone().map_nodes(|t| subst.apply(&t))
 }
 
-fn collect_vars<A>(graph: &OpenHypergraph<TypeExpr, A>) -> HashSet<TypeVar> {
-    let mut vars = HashSet::new();
+fn collect_vars<A>(graph: &OpenHypergraph<TypeExpr, A>) -> BTreeSet<TypeVar> {
+    let mut vars = BTreeSet::new();
     for label in &graph.hypergraph.nodes {
         collect_vars_expr(label, &mut vars);
     }
     vars
 }
 
-fn collect_vars_expr(expr: &TypeExpr, vars: &mut HashSet<TypeVar>) {
+fn collect_vars_expr(expr: &TypeExpr, vars: &mut BTreeSet<TypeVar>) {
     match expr {
         TypeExpr::Bool | TypeExpr::Unit | TypeExpr::Int | TypeExpr::Float | TypeExpr::Named(_) => {}
         TypeExpr::Var(var) => {
@@ -207,7 +207,7 @@ fn collect_choices<A>(graph: &OpenHypergraph<TypeExpr, A>) -> Vec<TypeExpr> {
         TypeExpr::Int,
         TypeExpr::Float,
     ];
-    let mut named = HashSet::new();
+    let mut named = BTreeSet::new();
     for label in &graph.hypergraph.nodes {
         collect_named_expr(label, &mut named);
     }
@@ -217,7 +217,7 @@ fn collect_choices<A>(graph: &OpenHypergraph<TypeExpr, A>) -> Vec<TypeExpr> {
     choices
 }
 
-fn collect_named_expr(expr: &TypeExpr, names: &mut HashSet<String>) {
+fn collect_named_expr(expr: &TypeExpr, names: &mut BTreeSet<String>) {
     match expr {
         TypeExpr::Named(name) => {
             names.insert(name.clone());
@@ -233,7 +233,7 @@ fn collect_named_expr(expr: &TypeExpr, names: &mut HashSet<String>) {
 fn backtrack_solve<A>(
     vars: &[TypeVar],
     idx: usize,
-    assignment: &mut HashMap<TypeVar, TypeExpr>,
+    assignment: &mut BTreeMap<TypeVar, TypeExpr>,
     constraints: &[TypeConstraint],
     graph: &OpenHypergraph<TypeExpr, A>,
     choices: &[TypeExpr],
@@ -256,7 +256,7 @@ fn backtrack_solve<A>(
     false
 }
 
-fn eval_expr(expr: &TypeExpr, assignment: &HashMap<TypeVar, TypeExpr>) -> TypeExpr {
+fn eval_expr(expr: &TypeExpr, assignment: &BTreeMap<TypeVar, TypeExpr>) -> TypeExpr {
     match expr {
         TypeExpr::Bool => TypeExpr::Bool,
         TypeExpr::Unit => TypeExpr::Unit,
@@ -278,7 +278,7 @@ fn eval_expr(expr: &TypeExpr, assignment: &HashMap<TypeVar, TypeExpr>) -> TypeEx
 
 fn primitives_ok<A>(
     graph: &OpenHypergraph<TypeExpr, A>,
-    assignment: &HashMap<TypeVar, TypeExpr>,
+    assignment: &BTreeMap<TypeVar, TypeExpr>,
 ) -> bool {
     graph.hypergraph.nodes.iter().all(|label| {
         let resolved = eval_expr(label, assignment);
@@ -291,7 +291,7 @@ fn primitives_ok<A>(
 
 fn constraints_satisfied(
     constraints: &[TypeConstraint],
-    assignment: &HashMap<TypeVar, TypeExpr>,
+    assignment: &BTreeMap<TypeVar, TypeExpr>,
 ) -> bool {
     for constraint in constraints {
         match constraint {

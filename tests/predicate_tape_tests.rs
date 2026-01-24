@@ -42,19 +42,16 @@ fn not_comparison_sets_negated_flag() {
     let tape = tape_from_predicate(&tree);
 
     match tape {
-        Tape::Seq(embed, _) => match *embed {
-            Tape::EmbedCircuit(circuit) => match *circuit {
-                Circuit::Seq(_, op) => match *op {
-                    Circuit::Generator(ExprGenerator::Predicate { negated, .. }) => {
-                        assert!(negated);
-                    }
-                    _ => panic!("expected predicate generator"),
-                },
-                _ => panic!("expected seq in embedded relation circuit"),
+        Tape::EmbedCircuit(circuit) => match *circuit {
+            Circuit::Seq(_, op) => match *op {
+                Circuit::Generator(ExprGenerator::Predicate { negated, .. }) => {
+                    assert!(negated);
+                }
+                _ => panic!("expected predicate generator"),
             },
-            _ => panic!("expected embedded circuit"),
+            _ => panic!("expected seq in embedded relation circuit"),
         },
-        _ => panic!("expected seq for negated relation"),
+        _ => panic!("expected embedded circuit for negated relation"),
     }
 }
 

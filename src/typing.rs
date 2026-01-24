@@ -1,6 +1,10 @@
-use std::collections::HashMap;
+use std::collections::BTreeMap;
+
+// NOTE: We use BTreeMap for deterministic iteration so type-variable numbering
+// is stable across runs/tests. If you want HashMap for performance, consider:
+// 1. adding a renaming/normalization pass or sorting keys before iteration.
+// 2. call new fresh var in one place only
 use std::fmt;
-use std::sync::atomic::{AtomicUsize, Ordering};
 
 use rustpython_parser::ast::{
     BoolOp, CmpOp, Constant, Expr, ExprCall, ExprCompare, ExprName, Operator, UnaryOp,
@@ -12,7 +16,22 @@ use crate::python_builtin_signatures::{
 };
 use crate::types::{TypeConstraint, TypeExpr, TypeVar as ExprTypeVar};
 
-static NEXT_TYPE_VAR: AtomicUsize = AtomicUsize::new(0);
+#[derive(Debug, Clone)]
+pub struct InferenceState {
+    next_type_var: usize,
+}
+
+impl InferenceState {
+    pub fn new(next_type_var: usize) -> Self {
+        Self { next_type_var }
+    }
+
+    fn fresh_type_var(&mut self) -> TypeExpr {
+        let id = self.next_type_var;
+        self.next_type_var += 1;
+        TypeExpr::Var(ExprTypeVar(id))
+    }
+}
 
 #[derive(Debug, Clone)]
 pub struct Judgment {
@@ -162,28 +181,46 @@ impl DeductionTree {
 }
 
 pub fn infer_expression_in_context(expr: &Expr, context: &Context) -> DeductionTree {
-    infer_expr(expr, context)
+    let mut state = InferenceState::new(context.entries().len());
+    infer_expression_in_context_with_state(expr, context, &mut state)
+}
+
+pub fn infer_expression_in_context_with_state(
+    expr: &Expr,
+    context: &Context,
+    state: &mut InferenceState,
+) -> DeductionTree {
+    infer_expr(expr, context, state)
 }
 
 pub fn infer_expression(expr: &Expr) -> DeductionTree {
     let mut context = Context::default();
     collect_free_vars(expr, &mut context);
-    reset_fresh_type_vars(context.entries().len());
-    infer_expr(expr, &context)
+    let mut state = InferenceState::new(context.entries().len());
+    infer_expr(expr, &context, &mut state)
 }
 
 pub fn infer_predicate_in_context(expr: &Expr, context: &Context) -> DeductionTree {
-    infer_predicate_expr(expr, context)
+    let mut state = InferenceState::new(context.entries().len());
+    infer_predicate_in_context_with_state(expr, context, &mut state)
+}
+
+pub fn infer_predicate_in_context_with_state(
+    expr: &Expr,
+    context: &Context,
+    state: &mut InferenceState,
+) -> DeductionTree {
+    infer_predicate_expr(expr, context, state)
 }
 
 pub fn infer_predicate(expr: &Expr) -> DeductionTree {
     let mut context = Context::default();
     collect_free_vars(expr, &mut context);
-    reset_fresh_type_vars(context.entries().len());
-    infer_predicate_expr(expr, &context)
+    let mut state = InferenceState::new(context.entries().len());
+    infer_predicate_expr(expr, &context, &mut state)
 }
 
-fn infer_expr(expr: &Expr, context: &Context) -> DeductionTree {
+fn infer_expr(expr: &Expr, context: &Context, state: &mut InferenceState) -> DeductionTree {
     match expr {
         Expr::Name(ExprName { id, .. }) => {
             let ty = context
@@ -203,7 +240,7 @@ fn infer_expr(expr: &Expr, context: &Context) -> DeductionTree {
         }
         Expr::UnaryOp(unary) => match unary.op {
             UnaryOp::UAdd | UnaryOp::USub => {
-                let child = infer_expr(&unary.operand, context);
+                let child = infer_expr(&unary.operand, context, state);
                 let ty = child.judgment.ty.clone();
                 let constraints = child.constraints().clone();
                 make_node(
@@ -217,7 +254,7 @@ fn infer_expr(expr: &Expr, context: &Context) -> DeductionTree {
                 )
             }
             UnaryOp::Not => {
-                let child = infer_expr(&unary.operand, context);
+                let child = infer_expr(&unary.operand, context, state);
                 if !is_potential_bool(&child.judgment.ty) {
                     panic!("type error: not expects Bool, got {}", child.judgment.ty);
                 }
@@ -236,14 +273,15 @@ fn infer_expr(expr: &Expr, context: &Context) -> DeductionTree {
             _ => panic!("unsupported unary operator in expression: {:?}", unary.op),
         },
         Expr::BinOp(bin) => {
-            let left = infer_expr(&bin.left, context);
-            let right = infer_expr(&bin.right, context);
+            let left = infer_expr(&bin.left, context, state);
+            let right = infer_expr(&bin.right, context, state);
             let op = binop_label(&bin.op);
             let mut constraints = merge_child_constraints(&[left.clone(), right.clone()]);
             let ty = resolve_builtin_output(
                 &op,
                 &[left.judgment.ty.clone(), right.judgment.ty.clone()],
                 &mut constraints,
+                state,
             );
             make_node(
                 "BinOp",
@@ -255,11 +293,11 @@ fn infer_expr(expr: &Expr, context: &Context) -> DeductionTree {
                 constraints,
             )
         }
-        Expr::Call(call) => infer_call(expr, call, context),
+        Expr::Call(call) => infer_call(expr, call, context, state),
         Expr::BoolOp(bool_op) => {
             let mut children = Vec::with_capacity(bool_op.values.len());
             for value in &bool_op.values {
-                let child = infer_expr(value, context);
+                let child = infer_expr(value, context, state);
                 if !is_potential_bool(&child.judgment.ty) {
                     panic!(
                         "type error: boolean operator expects Bool, got {}",
@@ -287,14 +325,15 @@ fn infer_expr(expr: &Expr, context: &Context) -> DeductionTree {
             if compare.ops.len() != 1 || compare.comparators.len() != 1 {
                 panic!("chained comparisons are not supported in expressions");
             }
-            let left = infer_expr(&compare.left, context);
-            let right = infer_expr(&compare.comparators[0], context);
+            let left = infer_expr(&compare.left, context, state);
+            let right = infer_expr(&compare.comparators[0], context, state);
             let op_label = compare_op_label(&compare.ops[0]);
             let mut constraints = merge_child_constraints(&[left.clone(), right.clone()]);
             let output = resolve_builtin_output(
                 &op_label,
                 &[left.judgment.ty.clone(), right.judgment.ty.clone()],
                 &mut constraints,
+                state,
             );
             if !is_potential_bool(&output) {
                 panic!("type error: comparison expects Bool result, got {}", output);
@@ -313,11 +352,15 @@ fn infer_expr(expr: &Expr, context: &Context) -> DeductionTree {
     }
 }
 
-fn infer_predicate_expr(expr: &Expr, context: &Context) -> DeductionTree {
+fn infer_predicate_expr(
+    expr: &Expr,
+    context: &Context,
+    state: &mut InferenceState,
+) -> DeductionTree {
     match expr {
         Expr::UnaryOp(unary) => match unary.op {
             UnaryOp::Not => {
-                let child = infer_predicate_relation(&unary.operand, context);
+                let child = infer_predicate_relation(&unary.operand, context, state);
                 let constraints = child.constraints().clone();
                 make_node(
                     "PredBar",
@@ -334,7 +377,7 @@ fn infer_predicate_expr(expr: &Expr, context: &Context) -> DeductionTree {
         Expr::BoolOp(bool_op) => {
             let mut children = Vec::with_capacity(bool_op.values.len());
             for value in &bool_op.values {
-                let child = infer_predicate_expr(value, context);
+                let child = infer_predicate_expr(value, context, state);
                 if child.judgment.ty != TypeExpr::Bool {
                     panic!(
                         "type error: predicate operator expects Bool, got {}",
@@ -358,8 +401,8 @@ fn infer_predicate_expr(expr: &Expr, context: &Context) -> DeductionTree {
                 constraints,
             )
         }
-        Expr::Call(call) => infer_predicate_call(expr, call, context),
-        Expr::Compare(compare) => infer_predicate_compare(expr, compare, context),
+        Expr::Call(call) => infer_predicate_call(expr, call, context, state),
+        Expr::Compare(compare) => infer_predicate_compare(expr, compare, context, state),
         Expr::Constant(c) => match &c.value {
             Constant::Bool(value) => make_leaf(
                 "PredConst",
@@ -374,21 +417,30 @@ fn infer_predicate_expr(expr: &Expr, context: &Context) -> DeductionTree {
     }
 }
 
-fn infer_predicate_relation(expr: &Expr, context: &Context) -> DeductionTree {
+fn infer_predicate_relation(
+    expr: &Expr,
+    context: &Context,
+    state: &mut InferenceState,
+) -> DeductionTree {
     match expr {
-        Expr::Call(call) => infer_predicate_call(expr, call, context),
-        Expr::Compare(compare) => infer_predicate_compare(expr, compare, context),
+        Expr::Call(call) => infer_predicate_call(expr, call, context, state),
+        Expr::Compare(compare) => infer_predicate_compare(expr, compare, context, state),
         _ => panic!("predicate relation expects a call or comparison"),
     }
 }
 
-fn infer_predicate_compare(expr: &Expr, compare: &ExprCompare, context: &Context) -> DeductionTree {
+fn infer_predicate_compare(
+    expr: &Expr,
+    compare: &ExprCompare,
+    context: &Context,
+    state: &mut InferenceState,
+) -> DeductionTree {
     if compare.ops.len() != 1 || compare.comparators.len() != 1 {
         panic!("chained comparisons are not supported in predicates");
     }
 
-    let left = infer_expression_in_context(&compare.left, context);
-    let right = infer_expression_in_context(&compare.comparators[0], context);
+    let left = infer_expression_in_context_with_state(&compare.left, context, state);
+    let right = infer_expression_in_context_with_state(&compare.comparators[0], context, state);
 
     let op_label = compare_op_label(&compare.ops[0]);
     let mut constraints = merge_child_constraints(&[left.clone(), right.clone()]);
@@ -396,6 +448,7 @@ fn infer_predicate_compare(expr: &Expr, compare: &ExprCompare, context: &Context
         &op_label,
         &[left.judgment.ty.clone(), right.judgment.ty.clone()],
         &mut constraints,
+        state,
     );
     if !is_potential_bool(&output) {
         panic!("type error: comparison expects Bool result, got {}", output);
@@ -411,7 +464,12 @@ fn infer_predicate_compare(expr: &Expr, compare: &ExprCompare, context: &Context
     )
 }
 
-fn infer_predicate_call(expr: &Expr, call: &ExprCall, context: &Context) -> DeductionTree {
+fn infer_predicate_call(
+    expr: &Expr,
+    call: &ExprCall,
+    context: &Context,
+    state: &mut InferenceState,
+) -> DeductionTree {
     if !call.keywords.is_empty() {
         panic!("keyword arguments are not supported");
     }
@@ -424,12 +482,12 @@ fn infer_predicate_call(expr: &Expr, call: &ExprCall, context: &Context) -> Dedu
     let mut children = Vec::with_capacity(call.args.len());
     let mut arg_types = Vec::with_capacity(call.args.len());
     for arg in &call.args {
-        let child = infer_expr(arg, context);
+        let child = infer_expr(arg, context, state);
         arg_types.push(child.judgment.ty.clone());
         children.push(child);
     }
     let mut constraints = merge_child_constraints(&children);
-    let output = resolve_builtin_output(&name, &arg_types, &mut constraints);
+    let output = resolve_builtin_output(&name, &arg_types, &mut constraints, state);
     if !is_potential_bool(&output) {
         panic!(
             "predicate call expects Bool, got {} from `{}`",
@@ -447,7 +505,12 @@ fn infer_predicate_call(expr: &Expr, call: &ExprCall, context: &Context) -> Dedu
     )
 }
 
-fn infer_call(expr: &Expr, call: &ExprCall, context: &Context) -> DeductionTree {
+fn infer_call(
+    expr: &Expr,
+    call: &ExprCall,
+    context: &Context,
+    state: &mut InferenceState,
+) -> DeductionTree {
     if !call.keywords.is_empty() {
         panic!("keyword arguments are not supported");
     }
@@ -460,12 +523,12 @@ fn infer_call(expr: &Expr, call: &ExprCall, context: &Context) -> DeductionTree 
     let mut children = Vec::with_capacity(call.args.len());
     let mut arg_types = Vec::with_capacity(call.args.len());
     for arg in &call.args {
-        let child = infer_expr(arg, context);
+        let child = infer_expr(arg, context, state);
         arg_types.push(child.judgment.ty.clone());
         children.push(child);
     }
     let mut constraints = merge_child_constraints(&children);
-    let ty = resolve_builtin_output(&name, &arg_types, &mut constraints);
+    let ty = resolve_builtin_output(&name, &arg_types, &mut constraints, state);
     make_node(
         "Call",
         expr,
@@ -565,6 +628,7 @@ fn resolve_builtin_output(
     name: &str,
     args: &[TypeExpr],
     constraints: &mut ConstraintStore,
+    state: &mut InferenceState,
 ) -> TypeExpr {
     let schemes = builtin_schemes(name, args.len());
     if schemes.is_empty() {
@@ -572,7 +636,7 @@ fn resolve_builtin_output(
     }
 
     for scheme in schemes {
-        if let Some(output) = match_scheme_with_constraints(args, &scheme, constraints) {
+        if let Some(output) = match_scheme_with_constraints(args, &scheme, constraints, state) {
             return output;
         }
     }
@@ -601,12 +665,13 @@ fn match_scheme_with_constraints(
     args: &[TypeExpr],
     scheme: &TypeScheme,
     store: &mut ConstraintStore,
+    state: &mut InferenceState,
 ) -> Option<TypeExpr> {
     if args.len() != scheme.inputs.len() {
         return None;
     }
 
-    let mut mapping = HashMap::new();
+    let mut mapping = BTreeMap::new();
     let mut local_constraints = Vec::new();
 
     for (arg, expected) in args.iter().zip(scheme.inputs.iter()) {
@@ -640,7 +705,7 @@ fn match_scheme_with_constraints(
                 let ty = mapping
                     .get(var)
                     .cloned()
-                    .unwrap_or_else(|| fresh_mapped_var(&mut mapping, var));
+                    .unwrap_or_else(|| fresh_mapped_var(&mut mapping, var, state));
                 if !is_potential_numeric(&ty) {
                     return None;
                 }
@@ -650,31 +715,31 @@ fn match_scheme_with_constraints(
                 let ty = mapping
                     .get(var)
                     .cloned()
-                    .unwrap_or_else(|| fresh_mapped_var(&mut mapping, var));
+                    .unwrap_or_else(|| fresh_mapped_var(&mut mapping, var, state));
                 local_constraints.push(TypeConstraint::Iterable(ty));
             }
             Constraint::Sequence(var) => {
                 let ty = mapping
                     .get(var)
                     .cloned()
-                    .unwrap_or_else(|| fresh_mapped_var(&mut mapping, var));
+                    .unwrap_or_else(|| fresh_mapped_var(&mut mapping, var, state));
                 local_constraints.push(TypeConstraint::Sequence(ty));
             }
             Constraint::Mapping(key, value) => {
                 let key_ty = mapping
                     .get(key)
                     .cloned()
-                    .unwrap_or_else(|| fresh_mapped_var(&mut mapping, key));
+                    .unwrap_or_else(|| fresh_mapped_var(&mut mapping, key, state));
                 let value_ty = mapping
                     .get(value)
                     .cloned()
-                    .unwrap_or_else(|| fresh_mapped_var(&mut mapping, value));
+                    .unwrap_or_else(|| fresh_mapped_var(&mut mapping, value, state));
                 local_constraints.push(TypeConstraint::Mapping(key_ty, value_ty));
             }
         }
     }
 
-    let output = output_from_scheme(&scheme.output, &mut mapping, &mut local_constraints);
+    let output = output_from_scheme(&scheme.output, &mut mapping, &mut local_constraints, state);
     for constraint in local_constraints {
         store.push(constraint);
     }
@@ -683,8 +748,9 @@ fn match_scheme_with_constraints(
 
 fn output_from_scheme(
     output: &PyType,
-    mapping: &mut HashMap<TypeVar, TypeExpr>,
+    mapping: &mut BTreeMap<TypeVar, TypeExpr>,
     constraints: &mut Vec<TypeConstraint>,
+    state: &mut InferenceState,
 ) -> TypeExpr {
     match output {
         PyType::Var(var) => match mapping.get(var).cloned() {
@@ -698,24 +764,28 @@ fn output_from_scheme(
                     if let Some(concrete) = concrete_from_constraints(&existing, constraints) {
                         return concrete;
                     }
-                    let fresh = fresh_type_var();
+                    let fresh = state.fresh_type_var();
                     constraints.push(TypeConstraint::Equal(fresh.clone(), existing));
                     mapping.insert(var.clone(), fresh.clone());
                     fresh
                 }
             },
             None => {
-                let fresh = fresh_type_var();
+                let fresh = state.fresh_type_var();
                 mapping.insert(var.clone(), fresh.clone());
                 fresh
             }
         },
-        _ => pytype_to_typeexpr(output, mapping),
+        _ => pytype_to_typeexpr(output, mapping, state),
     }
 }
 
-fn fresh_mapped_var(mapping: &mut HashMap<TypeVar, TypeExpr>, var: &TypeVar) -> TypeExpr {
-    let fresh = fresh_type_var();
+fn fresh_mapped_var(
+    mapping: &mut BTreeMap<TypeVar, TypeExpr>,
+    var: &TypeVar,
+    state: &mut InferenceState,
+) -> TypeExpr {
+    let fresh = state.fresh_type_var();
     mapping.insert(var.clone(), fresh.clone());
     fresh
 }
@@ -754,7 +824,11 @@ fn is_concrete_type(expr: &TypeExpr) -> bool {
     )
 }
 
-fn pytype_to_typeexpr(pytype: &PyType, mapping: &mut HashMap<TypeVar, TypeExpr>) -> TypeExpr {
+fn pytype_to_typeexpr(
+    pytype: &PyType,
+    mapping: &mut BTreeMap<TypeVar, TypeExpr>,
+    state: &mut InferenceState,
+) -> TypeExpr {
     match pytype {
         PyType::Bool => TypeExpr::Bool,
         PyType::Int => TypeExpr::Int,
@@ -762,14 +836,14 @@ fn pytype_to_typeexpr(pytype: &PyType, mapping: &mut HashMap<TypeVar, TypeExpr>)
         PyType::NoneType => TypeExpr::Unit,
         PyType::Var(var) => mapping
             .entry(var.clone())
-            .or_insert_with(fresh_type_var)
+            .or_insert_with(|| state.fresh_type_var())
             .clone(),
         PyType::Any => TypeExpr::Named("Any".to_string()),
         _ => TypeExpr::Named(format_pytype(pytype, mapping)),
     }
 }
 
-fn pytype_to_typeexpr_label(pytype: &PyType, mapping: &HashMap<TypeVar, TypeExpr>) -> TypeExpr {
+fn pytype_to_typeexpr_label(pytype: &PyType, mapping: &BTreeMap<TypeVar, TypeExpr>) -> TypeExpr {
     match pytype {
         PyType::Bool => TypeExpr::Bool,
         PyType::Int => TypeExpr::Int,
@@ -784,7 +858,7 @@ fn pytype_to_typeexpr_label(pytype: &PyType, mapping: &HashMap<TypeVar, TypeExpr
     }
 }
 
-fn format_pytype(pytype: &PyType, mapping: &HashMap<TypeVar, TypeExpr>) -> String {
+fn format_pytype(pytype: &PyType, mapping: &BTreeMap<TypeVar, TypeExpr>) -> String {
     match pytype {
         PyType::Any => "Any".to_string(),
         PyType::NoneType => "None".to_string(),
@@ -828,15 +902,6 @@ fn format_pytype(pytype: &PyType, mapping: &HashMap<TypeVar, TypeExpr>) -> Strin
             format_pytype(value, mapping)
         ),
     }
-}
-
-fn fresh_type_var() -> TypeExpr {
-    let id = NEXT_TYPE_VAR.fetch_add(1, Ordering::Relaxed);
-    TypeExpr::Var(ExprTypeVar(id))
-}
-
-pub(crate) fn reset_fresh_type_vars(next: usize) {
-    NEXT_TYPE_VAR.store(next, Ordering::Relaxed);
 }
 
 fn expr_to_string(expr: &Expr) -> String {

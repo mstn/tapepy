@@ -437,7 +437,7 @@ fn generate_tape_quotient_stmts<O: Clone, E>(
 ) -> Vec<Stmt> {
     let mut stmts = Vec::new();
     let (lefts, rights) = &graph.hypergraph.quotient;
-    let mut unified_nodes = std::collections::HashMap::new();
+    let mut unified_nodes = std::collections::BTreeSet::new();
 
     for (left, right) in lefts.iter().zip(rights.iter()) {
         let left_idx = left.0;
@@ -448,7 +448,7 @@ fn generate_tape_quotient_stmts<O: Clone, E>(
             (right_idx, left_idx)
         };
 
-        if unified_nodes.insert(pair_key, true).is_none() {
+        if unified_nodes.insert(pair_key) {
             let edge = Edge {
                 ty: EdgeTy::Pair(
                     Vertex::N(NodeId(Id::Plain(format!("{}n_{}", prefix, left_idx)), None)),
@@ -993,7 +993,7 @@ fn generate_quotient_stmts<O: Clone>(
 ) -> Vec<Stmt> {
     let mut stmts = Vec::new();
     let (lefts, rights) = &graph.hypergraph.quotient;
-    let mut unified_nodes = std::collections::HashMap::new();
+    let mut unified_nodes = std::collections::BTreeSet::new();
 
     for (left, right) in lefts.iter().zip(rights.iter()) {
         let left_idx = left.0;
@@ -1004,7 +1004,7 @@ fn generate_quotient_stmts<O: Clone>(
             (right_idx, left_idx)
         };
 
-        if unified_nodes.insert(pair_key, true).is_none() {
+        if unified_nodes.insert(pair_key) {
             let edge = Edge {
                 ty: EdgeTy::Pair(
                     Vertex::N(NodeId(Id::Plain(format!("{}n_{}", prefix, left_idx)), None)),
