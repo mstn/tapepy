@@ -5,7 +5,7 @@ pub mod circuit;
 pub mod tape;
 
 pub use circuit::Circuit;
-pub use tape::{left_distributor, swap_poly, Tape, TapeEdge, Whisker};
+pub use tape::{inverse_left_distributor, left_distributor, swap_poly, Tape, TapeEdge, Whisker};
 
 pub trait GeneratorShape {
     fn arity(&self) -> usize;

@@ -210,6 +210,43 @@ impl<S: Clone, G: Clone> Tape<S, G> {
         left_distributor(poly, left, right)
     }
 
+    pub fn right_whisk_poly(&self, poly: &Polynomial<S>) -> Tape<S, G>
+    where
+        S: PartialEq,
+        G: GeneratorTypes<S>,
+    {
+        let (head, rest) = split_polynomial(poly);
+        let Some(head) = head else {
+            return Tape::IdZero;
+        };
+
+        if rest == Polynomial::zero() {
+            return self.right_whisk(&head);
+        }
+
+        let (inputs, outputs) = self
+            .io_types()
+            .expect("right whisking requires tape io types");
+        let left_poly = Polynomial::from_monomials(inputs);
+        let right_poly = Polynomial::from_monomials(outputs);
+
+        let left_dist = left_distributor(&left_poly, &Polynomial::monomial(head.clone()), &rest);
+        let mid = Tape::Sum(
+            Box::new(self.right_whisk(&head)),
+            Box::new(self.right_whisk_poly(&rest)),
+        );
+        let right_dist = inverse_left_distributor(
+            &right_poly,
+            &Polynomial::monomial(head),
+            &rest,
+        );
+
+        Tape::Seq(
+            Box::new(left_dist),
+            Box::new(Tape::Seq(Box::new(mid), Box::new(right_dist))),
+        )
+    }
+
     fn left_whisk_poly(&self, poly: &Polynomial<S>) -> Tape<S, G> {
         match poly {
             Polynomial::Zero => Tape::IdZero,
@@ -323,6 +360,39 @@ pub fn left_distributor<S: Clone, G: Clone>(
     Tape::Seq(Box::new(left_part), Box::new(right_part))
 }
 
+pub fn inverse_left_distributor<S: Clone, G: Clone>(
+    poly: &Polynomial<S>,
+    left: &Polynomial<S>,
+    right: &Polynomial<S>,
+) -> Tape<S, G> {
+    let (head, rest) = split_polynomial(poly);
+    let Some(head) = head else {
+        return Tape::IdZero;
+    };
+
+    let head_left = monomial_times_poly(&head, left);
+    let head_right = monomial_times_poly(&head, right);
+    let rest_left = Polynomial::product(rest.clone(), left.clone());
+    let rest_right = Polynomial::product(rest.clone(), right.clone());
+
+    let right_part = Tape::Sum(
+        Box::new(Tape::Sum(
+            Box::new(id_poly(&head_left)),
+            Box::new(swap_sum_blocks(&head_right, &rest_left)),
+        )),
+        Box::new(id_poly(&rest_right)),
+    );
+
+    let sum_left_right = Polynomial::sum(left.clone(), right.clone());
+    let head_sum = monomial_times_poly(&head, &sum_left_right);
+    let left_part_inv = Tape::Sum(
+        Box::new(id_poly(&head_sum)),
+        Box::new(inverse_left_distributor(&rest, left, right)),
+    );
+
+    Tape::Seq(Box::new(right_part), Box::new(left_part_inv))
+}
+
 pub fn swap_poly<S: Clone, G: Clone>(left: &Polynomial<S>, right: &Polynomial<S>) -> Tape<S, G> {
     let (head, rest) = split_polynomial(right);
     let Some(head) = head else {
@@ -351,15 +421,15 @@ impl<S: Clone, G: Clone> Whisker<Monomial<S>> for Tape<S, G> {
     }
 }
 
-impl<S: Clone, G: Clone> Whisker<Polynomial<S>> for Tape<S, G> {
+impl<S: Clone + PartialEq, G: GeneratorTypes<S> + Clone> Whisker<Polynomial<S>> for Tape<S, G> {
     type Output = Tape<S, G>;
 
     fn left_whisk(&self, rhs: &Polynomial<S>) -> Self::Output {
         self.left_whisk_poly(rhs)
     }
 
-    fn right_whisk(&self, _: &Polynomial<S>) -> Self::Output {
-        panic!("right whisking by a polynomial is not implemented");
+    fn right_whisk(&self, rhs: &Polynomial<S>) -> Self::Output {
+        self.right_whisk_poly(rhs)
     }
 }
 
