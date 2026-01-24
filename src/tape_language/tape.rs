@@ -1,5 +1,5 @@
 use open_hypergraphs::lax::{Arrow as _, Monoidal, OpenHypergraph};
-use std::fmt;
+use std::fmt::{self, Display};
 
 use super::{compose_lax_unchecked, Circuit, GeneratorShape, GeneratorTypes, Monomial};
 
@@ -124,6 +124,109 @@ impl<S, G: GeneratorShape> Tape<S, G> {
                 let len = mono.len();
                 TapeArity::new(len, len)
             }
+        }
+    }
+}
+
+impl<S: Clone + PartialEq + Display, G: GeneratorTypes<S>> Tape<S, G> {
+    pub fn io_types(&self) -> Option<(Vec<Monomial<S>>, Vec<Monomial<S>>)> {
+        match self {
+            Tape::Id(mono) => {
+                let atoms = monomial_atoms(mono);
+                Some((atoms.clone(), atoms))
+            }
+            Tape::IdZero => Some((Vec::new(), Vec::new())),
+            Tape::EmbedCircuit(circuit) => {
+                let (inputs, outputs) = circuit.io_types()?;
+                Some((
+                    inputs.into_iter().map(Monomial::atom).collect(),
+                    outputs.into_iter().map(Monomial::atom).collect(),
+                ))
+            }
+            Tape::Swap { left, right } => {
+                let mut inputs = monomial_atoms(left);
+                inputs.extend(monomial_atoms(right));
+                let mut outputs = monomial_atoms(right);
+                outputs.extend(monomial_atoms(left));
+                Some((inputs, outputs))
+            }
+            Tape::Seq(left, right) => {
+                let (left_in, left_out) = left.io_types()?;
+                let (right_in, right_out) = right.io_types()?;
+                if left_out != right_in {
+                    return None;
+                }
+                Some((left_in, right_out))
+            }
+            Tape::Product(left, right) => {
+                let (left_in, left_out) = left.io_types()?;
+                let (right_in, right_out) = right.io_types()?;
+                let mut inputs = left_in;
+                inputs.extend(right_in);
+                let mut outputs = left_out;
+                outputs.extend(right_out);
+                Some((inputs, outputs))
+            }
+            Tape::Sum(left, right) => {
+                let (left_in, left_out) = left.io_types()?;
+                let (right_in, right_out) = right.io_types()?;
+                let mut inputs = left_in;
+                inputs.extend(right_in);
+                let mut outputs = left_out;
+                outputs.extend(right_out);
+                Some((inputs, outputs))
+            }
+            Tape::Discard(mono) => Some((monomial_atoms(mono), Vec::new())),
+            Tape::Split(mono) => {
+                let atoms = monomial_atoms(mono);
+                let mut outputs = atoms.clone();
+                outputs.extend(atoms.clone());
+                Some((atoms, outputs))
+            }
+            Tape::Create(mono) => Some((Vec::new(), monomial_atoms(mono))),
+            Tape::Merge(mono) => {
+                let atoms = monomial_atoms(mono);
+                let mut inputs = atoms.clone();
+                inputs.extend(atoms.clone());
+                Some((inputs, atoms))
+            }
+        }
+    }
+}
+
+impl<S: Clone, G: Clone> Tape<S, G> {
+    pub fn left_whisk(&self, left: &Monomial<S>) -> Tape<S, G> {
+        match self {
+            Tape::IdZero => Tape::IdZero,
+            Tape::EmbedCircuit(circuit) => {
+                let id_left = Circuit::id(monomial_atom_sorts(left));
+                let whiskered = Circuit::product(id_left, circuit.as_ref().clone());
+                Tape::EmbedCircuit(Box::new(whiskered))
+            }
+            Tape::Seq(head, tail) => Tape::Seq(
+                Box::new(head.left_whisk(left)),
+                Box::new(tail.left_whisk(left)),
+            ),
+            Tape::Product(left_tape, right_tape) => Tape::Product(
+                Box::new(left_tape.left_whisk(left)),
+                Box::new(right_tape.left_whisk(left)),
+            ),
+            Tape::Sum(left_tape, right_tape) => Tape::Sum(
+                Box::new(left_tape.left_whisk(left)),
+                Box::new(right_tape.left_whisk(left)),
+            ),
+            Tape::Id(right) => Tape::Id(Monomial::product(left.clone(), right.clone())),
+            Tape::Swap {
+                left: swap_left,
+                right: swap_right,
+            } => Tape::Swap {
+                left: Monomial::product(left.clone(), swap_left.clone()),
+                right: Monomial::product(left.clone(), swap_right.clone()),
+            },
+            Tape::Discard(right) => Tape::Discard(Monomial::product(left.clone(), right.clone())),
+            Tape::Split(right) => Tape::Split(Monomial::product(left.clone(), right.clone())),
+            Tape::Create(right) => Tape::Create(Monomial::product(left.clone(), right.clone())),
+            Tape::Merge(right) => Tape::Merge(Monomial::product(left.clone(), right.clone())),
         }
     }
 }

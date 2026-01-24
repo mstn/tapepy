@@ -38,6 +38,17 @@ impl<S: fmt::Display> fmt::Display for Monomial<S> {
     }
 }
 
+impl<S: fmt::Display> fmt::Display for Polynomial<S> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let mut parts = Vec::new();
+        collect_polynomial_terms(self, &mut parts);
+        if parts.is_empty() {
+            return write!(f, "0");
+        }
+        write!(f, "{}", parts.join(" + "))
+    }
+}
+
 fn collect_monomial_parts<S: fmt::Display>(mono: &Monomial<S>, parts: &mut Vec<String>) {
     match mono {
         Monomial::One => {}
@@ -105,6 +116,17 @@ pub enum Polynomial<S> {
     Sum(Box<Polynomial<S>>, Box<Polynomial<S>>),
 }
 
+fn collect_polynomial_terms<S: fmt::Display>(poly: &Polynomial<S>, parts: &mut Vec<String>) {
+    match poly {
+        Polynomial::Zero => {}
+        Polynomial::Monomial(term) => parts.push(term.to_string()),
+        Polynomial::Sum(left, right) => {
+            collect_polynomial_terms(left, parts);
+            collect_polynomial_terms(right, parts);
+        }
+    }
+}
+
 impl<S> Polynomial<S> {
     pub fn zero() -> Self {
         Polynomial::Zero
@@ -122,6 +144,16 @@ impl<S> Polynomial<S> {
         monomials
             .into_iter()
             .map(Monomial::from_sorts)
+            .map(Polynomial::monomial)
+            .fold(Polynomial::zero(), Polynomial::sum)
+    }
+
+    pub fn from_monomials<I>(monomials: I) -> Self
+    where
+        I: IntoIterator<Item = Monomial<S>>,
+    {
+        monomials
+            .into_iter()
             .map(Polynomial::monomial)
             .fold(Polynomial::zero(), Polynomial::sum)
     }
