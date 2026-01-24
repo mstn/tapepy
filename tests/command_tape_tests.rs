@@ -4,7 +4,6 @@ use tapepy::command_tape::tape_from_command;
 use tapepy::command_typing::infer_command_from_suite;
 use tapepy::expression_circuit::ExprGenerator;
 use tapepy::tape_language::circuit::Circuit;
-use tapepy::tape_language::monomial_from_entries_typeexpr;
 use tapepy::tape_language::tape::monomial_atoms;
 use tapepy::tape_language::tape::Tape;
 use tapepy::tape_language::Monomial;
@@ -30,7 +29,7 @@ fn infer_tape(
 fn skip_is_id_tape() {
     let (tree, tape) = infer_tape("pass");
     let context_entries = tree.judgment().context().entries();
-    let expected = monomial_from_entries_typeexpr(context_entries);
+    let expected = Monomial::from_context(context_entries);
 
     match tape {
         Tape::Id(mono) => assert_eq!(mono, expected),
@@ -42,7 +41,7 @@ fn skip_is_id_tape() {
 fn abort_is_discard_tape() {
     let (tree, tape) = infer_tape("raise");
     let context_entries = tree.judgment().context().entries();
-    let expected = monomial_from_entries_typeexpr(context_entries);
+    let expected = Monomial::from_context(context_entries);
 
     match tape {
         Tape::Discard(mono) => assert_eq!(mono, expected),
@@ -421,7 +420,10 @@ fn nested_ifs_with_assignments_and_complex_conditions() {
                                 Tape::Seq(copy, prod) => {
                                     match *copy {
                                         Tape::EmbedCircuit(circuit) => {
-                                            assert_eq!(*circuit, Circuit::copy_wires(types.clone()));
+                                            assert_eq!(
+                                                *circuit,
+                                                Circuit::copy_wires(types.clone())
+                                            );
                                         }
                                         _ => panic!("expected embedded copy circuit for left gate"),
                                     }
@@ -430,11 +432,13 @@ fn nested_ifs_with_assignments_and_complex_conditions() {
                                             match *pred {
                                                 Tape::EmbedCircuit(circuit) => match *circuit {
                                                     Circuit::Seq(_, op) => match *op {
-                                                        Circuit::Generator(ExprGenerator::Predicate {
-                                                            name,
-                                                            input_types,
-                                                            negated,
-                                                        }) => {
+                                                        Circuit::Generator(
+                                                            ExprGenerator::Predicate {
+                                                                name,
+                                                                input_types,
+                                                                negated,
+                                                            },
+                                                        ) => {
                                                             assert_eq!(name, ">");
                                                             assert!(!negated);
                                                             assert_eq!(
@@ -444,7 +448,9 @@ fn nested_ifs_with_assignments_and_complex_conditions() {
                                                         }
                                                         _ => panic!("expected predicate generator"),
                                                     },
-                                                    _ => panic!("expected seq in predicate circuit"),
+                                                    _ => {
+                                                        panic!("expected seq in predicate circuit")
+                                                    }
                                                 },
                                                 _ => panic!("expected embedded predicate circuit"),
                                             }
@@ -460,20 +466,27 @@ fn nested_ifs_with_assignments_and_complex_conditions() {
                                 Tape::Seq(copy, prod) => {
                                     match *copy {
                                         Tape::EmbedCircuit(circuit) => {
-                                            assert_eq!(*circuit, Circuit::copy_wires(types.clone()));
+                                            assert_eq!(
+                                                *circuit,
+                                                Circuit::copy_wires(types.clone())
+                                            );
                                         }
-                                        _ => panic!("expected embedded copy circuit for right gate"),
+                                        _ => {
+                                            panic!("expected embedded copy circuit for right gate")
+                                        }
                                     }
                                     match *prod {
                                         Tape::Product(pred, exec) => {
                                             match *pred {
                                                 Tape::EmbedCircuit(circuit) => match *circuit {
                                                     Circuit::Seq(_, op) => match *op {
-                                                        Circuit::Generator(ExprGenerator::Predicate {
-                                                            name,
-                                                            input_types,
-                                                            negated,
-                                                        }) => {
+                                                        Circuit::Generator(
+                                                            ExprGenerator::Predicate {
+                                                                name,
+                                                                input_types,
+                                                                negated,
+                                                            },
+                                                        ) => {
                                                             assert_eq!(name, ">");
                                                             assert!(negated);
                                                             assert_eq!(
@@ -483,7 +496,9 @@ fn nested_ifs_with_assignments_and_complex_conditions() {
                                                         }
                                                         _ => panic!("expected predicate generator"),
                                                     },
-                                                    _ => panic!("expected seq in predicate circuit"),
+                                                    _ => {
+                                                        panic!("expected seq in predicate circuit")
+                                                    }
                                                 },
                                                 _ => panic!("expected embedded predicate circuit"),
                                             }
@@ -499,9 +514,14 @@ fn nested_ifs_with_assignments_and_complex_conditions() {
                                 Tape::Seq(copy, tail) => {
                                     match *copy {
                                         Tape::EmbedCircuit(circuit) => {
-                                            assert_eq!(*circuit, Circuit::copy_wires(types.clone()));
+                                            assert_eq!(
+                                                *circuit,
+                                                Circuit::copy_wires(types.clone())
+                                            );
                                         }
-                                        _ => panic!("expected embedded copy circuit for left inner if"),
+                                        _ => panic!(
+                                            "expected embedded copy circuit for left inner if"
+                                        ),
                                     }
                                     match *tail {
                                         Tape::Seq(branches, join) => {
@@ -563,7 +583,9 @@ fn nested_ifs_with_assignments_and_complex_conditions() {
                                                                 _ => panic!("expected product in left inner gate"),
                                                             }
                                                         }
-                                                        _ => panic!("expected seq in left inner gate"),
+                                                        _ => panic!(
+                                                            "expected seq in left inner gate"
+                                                        ),
                                                     }
 
                                                     match *right_branch {
@@ -620,7 +642,9 @@ fn nested_ifs_with_assignments_and_complex_conditions() {
                                                                 _ => panic!("expected product in right inner gate"),
                                                             }
                                                         }
-                                                        _ => panic!("expected seq in right inner gate"),
+                                                        _ => panic!(
+                                                            "expected seq in right inner gate"
+                                                        ),
                                                     }
                                                 }
                                                 _ => panic!("expected sum in left inner if"),
@@ -637,9 +661,14 @@ fn nested_ifs_with_assignments_and_complex_conditions() {
                                 Tape::Seq(copy, tail) => {
                                     match *copy {
                                         Tape::EmbedCircuit(circuit) => {
-                                            assert_eq!(*circuit, Circuit::copy_wires(types.clone()));
+                                            assert_eq!(
+                                                *circuit,
+                                                Circuit::copy_wires(types.clone())
+                                            );
                                         }
-                                        _ => panic!("expected embedded copy circuit for right inner if"),
+                                        _ => panic!(
+                                            "expected embedded copy circuit for right inner if"
+                                        ),
                                     }
                                     match *tail {
                                         Tape::Seq(branches, join) => {
@@ -884,18 +913,8 @@ fn assert_nested_if(
                     assert_join_wires_tape(join, context_types);
                     match &**branches {
                         Tape::Sum(left, right) => {
-                            assert_gate_tape(
-                                left,
-                                context_types,
-                                pred_inputs.clone(),
-                                false,
-                            );
-                            assert_gate_tape(
-                                right,
-                                context_types,
-                                pred_inputs,
-                                true,
-                            );
+                            assert_gate_tape(left, context_types, pred_inputs.clone(), false);
+                            assert_gate_tape(right, context_types, pred_inputs, true);
                             assert_assign_tape(left, &then_assign);
                             assert_assign_tape(right, &else_assign);
                         }
@@ -909,7 +928,10 @@ fn assert_nested_if(
     }
 }
 
-fn assert_assign_tape(tape: &Tape<TypeExpr, ExprGenerator>, expected: &Circuit<TypeExpr, ExprGenerator>) {
+fn assert_assign_tape(
+    tape: &Tape<TypeExpr, ExprGenerator>,
+    expected: &Circuit<TypeExpr, ExprGenerator>,
+) {
     let exec = match tape {
         Tape::Seq(_, prod) => match &**prod {
             Tape::Product(_, exec) => exec,
@@ -1060,10 +1082,7 @@ fn nested_ifs_with_complex_conditions_and_assignments() {
 
     let pred_outer = Tape::Seq(
         Box::new(Tape::copy_wires(context.clone())),
-        Box::new(Tape::Product(
-            Box::new(pred_x_gt_0),
-            Box::new(pred_x_gt_1),
-        )),
+        Box::new(Tape::Product(Box::new(pred_x_gt_0), Box::new(pred_x_gt_1))),
     );
     let pred_outer_neg = Tape::Seq(
         Box::new(Tape::Seq(
@@ -1093,10 +1112,7 @@ fn nested_ifs_with_complex_conditions_and_assignments() {
     let pred_right = Tape::Seq(
         Box::new(Tape::Seq(
             Box::new(Tape::Split(context.clone())),
-            Box::new(Tape::Sum(
-                Box::new(pred_x_gt_5),
-                Box::new(pred_x_gt_6),
-            )),
+            Box::new(Tape::Sum(Box::new(pred_x_gt_5), Box::new(pred_x_gt_6))),
         )),
         Box::new(Tape::Merge(Monomial::one())),
     );

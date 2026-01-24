@@ -1,6 +1,6 @@
 use crate::expression_circuit::circuit_from_expr_with_context;
 use crate::expression_circuit::ExprGenerator;
-use crate::tape_language::{monomial_from_entries_typeexpr, Circuit, Monomial, Tape};
+use crate::tape_language::{Circuit, Monomial, Tape};
 use crate::types::TypeExpr;
 use crate::typing::{DeductionTree, ExprForm};
 
@@ -15,11 +15,11 @@ pub fn tape_from_predicate_with_negation(
     match tree.form() {
         ExprForm::Const(label) => match (label.as_str(), negated) {
             ("True", false) | ("False", true) => {
-                let context = monomial_from_entries_typeexpr(&tree.judgment().context().entries());
+                let context = Monomial::from_context(&tree.judgment().context().entries());
                 Tape::Discard(context)
             }
             ("False", false) | ("True", true) => {
-                let context = monomial_from_entries_typeexpr(&tree.judgment().context().entries());
+                let context = Monomial::from_context(&tree.judgment().context().entries());
                 let discard = Tape::Discard(context);
                 Tape::Seq(Box::new(discard), Box::new(Tape::Create(Monomial::one())))
             }
@@ -30,10 +30,9 @@ pub fn tape_from_predicate_with_negation(
                 tree.assert_child_count(2, op.as_str());
                 let left = tape_from_predicate_with_negation(&tree.children()[0], negated);
                 let right = tape_from_predicate_with_negation(&tree.children()[1], negated);
-                let copy =
-                    Tape::copy_wires(monomial_from_entries_typeexpr(
-                        &tree.judgment().context().entries(),
-                    ));
+                let copy = Tape::copy_wires(Monomial::from_context(
+                    &tree.judgment().context().entries(),
+                ));
                 let tensor = Tape::Product(Box::new(left), Box::new(right));
                 Tape::Seq(Box::new(copy), Box::new(tensor))
             }
@@ -41,10 +40,9 @@ pub fn tape_from_predicate_with_negation(
                 tree.assert_child_count(2, op.as_str());
                 let left = tape_from_predicate_with_negation(&tree.children()[0], negated);
                 let right = tape_from_predicate_with_negation(&tree.children()[1], negated);
-                let split =
-                    Tape::Split(monomial_from_entries_typeexpr(
-                        &tree.judgment().context().entries(),
-                    ));
+                let split = Tape::Split(Monomial::from_context(
+                    &tree.judgment().context().entries(),
+                ));
                 let tensor = Tape::Sum(Box::new(left), Box::new(right));
                 let merged = Tape::Seq(Box::new(split), Box::new(tensor));
                 Tape::Seq(Box::new(merged), Box::new(Tape::Merge(Monomial::one())))

@@ -1,8 +1,6 @@
 use open_hypergraphs::lax::{Monoidal, OpenHypergraph};
 use std::fmt;
 
-use crate::types::TypeExpr;
-
 pub mod circuit;
 pub mod tape;
 
@@ -60,6 +58,16 @@ impl<S> Monomial<S> {
         Monomial::Atom(sort)
     }
 
+    /// Build a monomial from context entries; entry names are discarded.
+    pub fn from_context(entries: &[(String, S)]) -> Self
+    where
+        S: Clone,
+    {
+        entries.iter().fold(Monomial::one(), |acc, (_, ty)| {
+            Monomial::product(acc, Monomial::atom(ty.clone()))
+        })
+    }
+
     pub fn product(left: Monomial<S>, right: Monomial<S>) -> Self {
         match (left, right) {
             (Monomial::One, right) => right,
@@ -106,22 +114,6 @@ impl<S> Polynomial<S> {
             (left, right) => Polynomial::Sum(Box::new(left), Box::new(right)),
         }
     }
-}
-
-pub fn monomial_from_entries<S: Clone>(entries: &[(String, S)]) -> Monomial<S> {
-    entries.iter().fold(Monomial::one(), |acc, (_, ty)| {
-        Monomial::product(acc, Monomial::atom(ty.clone()))
-    })
-}
-
-pub fn monomial_from_entries_typeexpr(entries: &[(String, TypeExpr)]) -> Monomial<TypeExpr> {
-    entries.iter().fold(Monomial::one(), |acc, (_, ty)| {
-        if *ty == TypeExpr::Unit {
-            acc
-        } else {
-            Monomial::product(acc, Monomial::atom(ty.clone()))
-        }
-    })
 }
 
 pub(crate) fn compose_lax_unchecked<S: Clone + PartialEq, G: Clone>(

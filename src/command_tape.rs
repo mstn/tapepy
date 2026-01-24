@@ -1,7 +1,7 @@
 use crate::command_typing::{CommandChild, CommandDerivationTree, CommandForm};
 use crate::expression_circuit::{self, ExprGenerator};
 use crate::predicate_tape::{tape_from_predicate, tape_from_predicate_with_negation};
-use crate::tape_language::{monomial_from_entries_typeexpr, Circuit, Monomial, Tape};
+use crate::tape_language::{Circuit, Monomial, Tape};
 use crate::tape_language::tape::monomial_atoms;
 use crate::types::TypeExpr;
 
@@ -94,7 +94,7 @@ fn if_tape(tree: &CommandDerivationTree) -> Tape<TypeExpr, ExprGenerator> {
     let else_branch = else_branch.expect("if expects else branch");
 
     let context_entries = tree.judgment().context().entries();
-    let context = monomial_from_entries_typeexpr(context_entries);
+    let context = Monomial::from_context(context_entries);
     let then_tape = tape_from_command(then_branch);
     let else_tape = tape_from_command(else_branch);
     let pred_tape = tape_from_predicate(pred);
@@ -144,5 +144,5 @@ fn gate_tape(
 
 fn context_monomial(tree: &CommandDerivationTree) -> Monomial<TypeExpr> {
     let entries = tree.judgment().context().entries();
-    monomial_from_entries_typeexpr(entries)
+    Monomial::from_context(entries)
 }
