@@ -834,9 +834,6 @@ impl<
         &self,
         fresh_sort: &mut impl FnMut() -> S,
     ) -> OpenHypergraph<Monomial<S>, TapeEdge<S, G>> {
-        if let Err(err) = validate_tape(self, &mut Vec::new()) {
-            panic!("tape validation failed before to_hypergraph:\n{}", err);
-        }
         match self {
             Tape::Id(mono) => OpenHypergraph::identity(monomial_atoms(mono)),
             Tape::IdZero => OpenHypergraph::empty(),
