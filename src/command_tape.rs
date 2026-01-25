@@ -114,11 +114,11 @@ fn gate_tape(
     exec_tape: Tape<TypeExpr, ExprGenerator>,
 ) -> Tape<TypeExpr, ExprGenerator> {
     let id_context = Tape::Id(context.clone());
-    let filter = Tape::seq(
+
+    Tape::seq(
         Tape::copy_wires(context.clone()),
-        Tape::product(&pred_tape, &id_context),
-    );
-    Tape::seq(filter, exec_tape)
+        Tape::seq(Tape::product(&pred_tape, &id_context), exec_tape),
+    )
 }
 
 fn context_monomial(tree: &CommandDerivationTree) -> Monomial<TypeExpr> {

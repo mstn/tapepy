@@ -216,9 +216,12 @@ impl<S: Clone + PartialEq + Debug + Display, G: Debug + GeneratorTypes<S> + Clon
 
         let left = t2.left_whisk(&p1);
         let right = t1.right_whisk(&q2);
-        let tape = Tape::seq(left.clone(), right.clone());
+        // Product construction guarantees interfaces align, so we can safely
+        // collapse Id;X or X;Id here without forcing full type resolution elsewhere.
+        let tape = Tape::seq_with_id(left.clone(), right.clone());
 
         if let Err(err) = tape.validate() {
+            // TODO maybe return Option
             println!("{:?}", t1);
             println!("{:?}", t2);
             println!("============");
@@ -250,8 +253,41 @@ impl<S: Clone, G> Tape<S, G> {
     pub fn seq(left: Tape<S, G>, right: Tape<S, G>) -> Tape<S, G> {
         match (left, right) {
             (Tape::IdZero, Tape::IdZero) => Tape::IdZero,
+            (Tape::EmbedCircuit(left), Tape::EmbedCircuit(right)) => {
+                let composed = Circuit::seq(*left, *right);
+                Tape::EmbedCircuit(Box::new(composed))
+            }
             (left, right) => Tape::Seq(Box::new(left), Box::new(right)),
         }
+    }
+
+    fn seq_with_id(left: Tape<S, G>, right: Tape<S, G>) -> Tape<S, G>
+    where
+        S: Clone + PartialEq,
+        G: GeneratorTypes<S>,
+    {
+        match (&left, &right) {
+            (Tape::Id(_), _) => {
+                if let (Some((_left_in, left_out)), Some((right_in, _right_out))) =
+                    (left.io_types(), right.io_types())
+                {
+                    if left_out == right_in {
+                        return right;
+                    }
+                }
+            }
+            (_, Tape::Id(_)) => {
+                if let (Some((_left_in, left_out)), Some((right_in, _right_out))) =
+                    (left.io_types(), right.io_types())
+                {
+                    if left_out == right_in {
+                        return left;
+                    }
+                }
+            }
+            _ => {}
+        }
+        Tape::seq(left, right)
     }
 
     pub fn left_distributor(
