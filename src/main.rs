@@ -46,9 +46,9 @@ enum Command {
         /// Output file path.
         #[arg(long)]
         output: PathBuf,
-        /// Strictify (solve types + substitute) before output.
+        /// Skip type solving and emit the raw tape hypergraph.
         #[arg(long)]
-        strictify: bool,
+        raw_tape: bool,
     },
 }
 
@@ -66,8 +66,8 @@ fn main() -> Result<(), Box<dyn Error>> {
             language,
             format,
             output,
-            strictify,
-        } => compile_file(&filepath, &language, format, &output, strictify),
+            raw_tape,
+        } => compile_file(&filepath, &language, format, &output, raw_tape),
     }
 }
 
@@ -76,7 +76,7 @@ fn compile_file(
     language: &str,
     format: OutputFormat,
     output: &PathBuf,
-    strictify: bool,
+    raw_tape: bool,
 ) -> Result<(), Box<dyn Error>> {
     let source = std::fs::read_to_string(filepath)?;
     if language.to_lowercase() != "python" {
@@ -99,11 +99,11 @@ fn compile_file(
         types::TypeExpr::Var(types::TypeVar(id))
     });
 
-    let graph = if strictify {
+    let graph = if raw_tape {
+        term
+    } else {
         let constraints = collect_constraints(&tree);
         solve_and_strictify_program_tape(&term, constraints.constraints())
-    } else {
-        term
     };
 
     let opts = Options {
