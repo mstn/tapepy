@@ -213,7 +213,7 @@ impl<S: Clone + PartialEq + Debug + Display, G: GeneratorTypes<S> + Clone + Disp
 
         let left = t2.left_whisk(&p1);
         let right = t1.right_whisk(&q2);
-        Tape::Seq(Box::new(left), Box::new(right))
+        Tape::seq(left, right)
     }
 }
 
@@ -233,6 +233,13 @@ impl<S: Clone, G: Clone> Tape<S, G> {
         }
     }
 
+    pub fn seq(left: Tape<S, G>, right: Tape<S, G>) -> Tape<S, G> {
+        match (left, right) {
+            (Tape::IdZero, Tape::IdZero) => Tape::IdZero,
+            (left, right) => Tape::Seq(Box::new(left), Box::new(right)),
+        }
+    }
+
     pub fn left_distributor(
         poly: &Polynomial<S>,
         left: &Polynomial<S>,
@@ -248,7 +255,7 @@ impl<S: Clone, G: Clone> Tape<S, G> {
     pub fn right_whisk_poly(&self, poly: &Polynomial<S>) -> Tape<S, G>
     where
         S: Clone + PartialEq + Debug + Display,
-        G: GeneratorTypes<S>,
+        G: Clone + GeneratorTypes<S>,
     {
         let (head, rest) = split_polynomial(poly);
         let Some(head) = head else {
@@ -269,10 +276,7 @@ impl<S: Clone, G: Clone> Tape<S, G> {
         let mid = Tape::sum(self.right_whisk_mono(&head), self.right_whisk_poly(&rest));
         let right_dist = inverse_left_distributor(&right_poly, &Polynomial::monomial(head), &rest);
 
-        Tape::Seq(
-            Box::new(left_dist),
-            Box::new(Tape::Seq(Box::new(mid), Box::new(right_dist))),
-        )
+        Tape::seq(left_dist, Tape::seq(mid, right_dist))
     }
 
     fn left_whisk_poly(&self, poly: &Polynomial<S>) -> Tape<S, G> {
@@ -378,7 +382,7 @@ pub fn left_distributor<S: Clone, G: Clone>(
     let swap = swap_sum_blocks(&head_right, &rest_left);
     let right_part = Tape::sum(Tape::sum(id_poly(&head_left), swap), id_poly(&rest_right));
 
-    Tape::Seq(Box::new(left_part), Box::new(right_part))
+    Tape::seq(left_part, right_part)
 }
 
 pub fn inverse_left_distributor<S: Clone, G: Clone>(
@@ -411,7 +415,7 @@ pub fn inverse_left_distributor<S: Clone, G: Clone>(
         inverse_left_distributor(&rest, left, right),
     );
 
-    Tape::Seq(Box::new(right_part), Box::new(left_part_inv))
+    Tape::seq(right_part, left_part_inv)
 }
 
 pub fn swap_poly<S: Clone, G: Clone>(left: &Polynomial<S>, right: &Polynomial<S>) -> Tape<S, G> {
@@ -427,7 +431,7 @@ pub fn swap_poly<S: Clone, G: Clone>(left: &Polynomial<S>, right: &Polynomial<S>
     let sum_swaps = sum_swaps(left, &head);
     let right_part = Tape::sum(sum_swaps, swap_poly(left, &rest_poly));
 
-    Tape::Seq(Box::new(left_dist), Box::new(right_part))
+    Tape::seq(left_dist, right_part)
 }
 
 impl<S: Clone, G: Clone> Whisker<Monomial<S>> for Tape<S, G> {
