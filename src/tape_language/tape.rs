@@ -826,10 +826,15 @@ mod tests {
 
     #[test]
     fn swap_sum_blocks_reorders_atoms() {
-        let u = atom("U");
-        let u2 = atom("U2");
-        let v = atom("V");
-        let w = atom("W");
+        let u_sort = TypeExpr::Named("U".to_string());
+        let u2_sort = TypeExpr::Named("U2".to_string());
+        let v_sort = TypeExpr::Named("V".to_string());
+        let w_sort = TypeExpr::Named("W".to_string());
+
+        let u = Monomial::atom(u_sort.clone());
+        let u2 = Monomial::atom(u2_sort.clone());
+        let v = Monomial::atom(v_sort.clone());
+        let w = Monomial::atom(w_sort.clone());
 
         let left = Polynomial::sum(
             Polynomial::monomial(Monomial::product(u.clone(), v.clone())),
@@ -840,15 +845,22 @@ mod tests {
         let tape: Tape<TypeExpr, ExprGenerator> = swap_sum_blocks(&left, &right);
         let (inputs, outputs) = tape.io_types().expect("expected io types");
 
-        let expected_inputs = vec![
-            u.clone(),
-            v.clone(),
-            u2.clone(),
-            v.clone(),
-            u.clone(),
-            w.clone(),
-        ];
-        let expected_outputs = vec![u.clone(), w, u, v.clone(), u2, v.clone()];
+        let expected_inputs = vec![Monomial::from_sorts(vec![
+            u_sort.clone(),
+            v_sort.clone(),
+            u2_sort.clone(),
+            v_sort.clone(),
+            u_sort.clone(),
+            w_sort.clone(),
+        ])];
+        let expected_outputs = vec![Monomial::from_sorts(vec![
+            u_sort.clone(),
+            w_sort,
+            u_sort.clone(),
+            v_sort.clone(),
+            u2_sort,
+            v_sort,
+        ])];
 
         assert_eq!(inputs, expected_inputs);
         assert_eq!(outputs, expected_outputs);
