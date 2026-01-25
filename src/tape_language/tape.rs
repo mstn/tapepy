@@ -225,17 +225,29 @@ pub trait Whisker<Rhs> {
 }
 
 impl<S: Clone, G: Clone> Tape<S, G> {
+    pub fn sum(left: Tape<S, G>, right: Tape<S, G>) -> Tape<S, G> {
+        match (left, right) {
+            (Tape::IdZero, right) => right,
+            (left, Tape::IdZero) => left,
+            (left, right) => Tape::Sum(Box::new(left), Box::new(right)),
+        }
+    }
+
     pub fn left_distributor(
         poly: &Polynomial<S>,
         left: &Polynomial<S>,
         right: &Polynomial<S>,
-    ) -> Tape<S, G> {
+    ) -> Tape<S, G>
+    where
+        S: Clone,
+        G: Clone,
+    {
         left_distributor(poly, left, right)
     }
 
     pub fn right_whisk_poly(&self, poly: &Polynomial<S>) -> Tape<S, G>
     where
-        S: PartialEq + Debug + Display,
+        S: Clone + PartialEq + Debug + Display,
         G: GeneratorTypes<S>,
     {
         let (head, rest) = split_polynomial(poly);
@@ -254,10 +266,7 @@ impl<S: Clone, G: Clone> Tape<S, G> {
         let right_poly = Polynomial::from_monomials(outputs);
 
         let left_dist = left_distributor(&left_poly, &Polynomial::monomial(head.clone()), &rest);
-        let mid = Tape::Sum(
-            Box::new(self.right_whisk_mono(&head)),
-            Box::new(self.right_whisk_poly(&rest)),
-        );
+        let mid = Tape::sum(self.right_whisk_mono(&head), self.right_whisk_poly(&rest));
         let right_dist = inverse_left_distributor(&right_poly, &Polynomial::monomial(head), &rest);
 
         Tape::Seq(
@@ -270,10 +279,9 @@ impl<S: Clone, G: Clone> Tape<S, G> {
         match poly {
             Polynomial::Zero => Tape::IdZero,
             Polynomial::Monomial(term) => self.left_whisk_mono(term),
-            Polynomial::Sum(left, right) => Tape::Sum(
-                Box::new(self.left_whisk_poly(left)),
-                Box::new(self.left_whisk_poly(right)),
-            ),
+            Polynomial::Sum(left, right) => {
+                Tape::sum(self.left_whisk_poly(left), self.left_whisk_poly(right))
+            }
         }
     }
 
@@ -360,10 +368,7 @@ pub fn left_distributor<S: Clone, G: Clone>(
 
     let sum_left_right = Polynomial::sum(left.clone(), right.clone());
     let head_sum = monomial_times_poly(&head, &sum_left_right);
-    let left_part = Tape::Sum(
-        Box::new(id_poly(&head_sum)),
-        Box::new(left_distributor(&rest, left, right)),
-    );
+    let left_part = Tape::sum(id_poly(&head_sum), left_distributor(&rest, left, right));
 
     let head_left = monomial_times_poly(&head, left);
     let head_right = monomial_times_poly(&head, right);
@@ -371,10 +376,7 @@ pub fn left_distributor<S: Clone, G: Clone>(
     let rest_right = Polynomial::product(rest, right.clone());
 
     let swap = swap_sum_blocks(&head_right, &rest_left);
-    let right_part = Tape::Sum(
-        Box::new(Tape::Sum(Box::new(id_poly(&head_left)), Box::new(swap))),
-        Box::new(id_poly(&rest_right)),
-    );
+    let right_part = Tape::sum(Tape::sum(id_poly(&head_left), swap), id_poly(&rest_right));
 
     Tape::Seq(Box::new(left_part), Box::new(right_part))
 }
@@ -394,19 +396,19 @@ pub fn inverse_left_distributor<S: Clone, G: Clone>(
     let rest_left = Polynomial::product(rest.clone(), left.clone());
     let rest_right = Polynomial::product(rest.clone(), right.clone());
 
-    let right_part = Tape::Sum(
-        Box::new(Tape::Sum(
-            Box::new(id_poly(&head_left)),
-            Box::new(swap_sum_blocks(&head_right, &rest_left)),
-        )),
-        Box::new(id_poly(&rest_right)),
+    let right_part = Tape::sum(
+        Tape::sum(
+            id_poly(&head_left),
+            swap_sum_blocks(&head_right, &rest_left),
+        ),
+        id_poly(&rest_right),
     );
 
     let sum_left_right = Polynomial::sum(left.clone(), right.clone());
     let head_sum = monomial_times_poly(&head, &sum_left_right);
-    let left_part_inv = Tape::Sum(
-        Box::new(id_poly(&head_sum)),
-        Box::new(inverse_left_distributor(&rest, left, right)),
+    let left_part_inv = Tape::sum(
+        id_poly(&head_sum),
+        inverse_left_distributor(&rest, left, right),
     );
 
     Tape::Seq(Box::new(right_part), Box::new(left_part_inv))
@@ -423,7 +425,7 @@ pub fn swap_poly<S: Clone, G: Clone>(left: &Polynomial<S>, right: &Polynomial<S>
     let left_dist = left_distributor(left, &head_poly, &rest_poly);
 
     let sum_swaps = sum_swaps(left, &head);
-    let right_part = Tape::Sum(Box::new(sum_swaps), Box::new(swap_poly(left, &rest_poly)));
+    let right_part = Tape::sum(sum_swaps, swap_poly(left, &rest_poly));
 
     Tape::Seq(Box::new(left_dist), Box::new(right_part))
 }
@@ -476,14 +478,14 @@ fn split_polynomial<S: Clone>(poly: &Polynomial<S>) -> (Option<Monomial<S>>, Pol
     (Some(head), rest)
 }
 
-fn id_poly<S: Clone, G>(poly: &Polynomial<S>) -> Tape<S, G> {
+fn id_poly<S: Clone, G: Clone>(poly: &Polynomial<S>) -> Tape<S, G> {
     let mut terms = polynomial_monomials(poly);
     if terms.is_empty() {
         return Tape::IdZero;
     }
     let mut acc = Tape::Id(terms.remove(0));
     for term in terms {
-        acc = Tape::Sum(Box::new(acc), Box::new(Tape::Id(term)));
+        acc = Tape::sum(acc, Tape::Id(term));
     }
     acc
 }
@@ -496,7 +498,7 @@ fn monomial_times_poly<S: Clone>(mono: &Monomial<S>, poly: &Polynomial<S>) -> Po
     )
 }
 
-fn sum_swaps<S: Clone, G>(poly: &Polynomial<S>, right: &Monomial<S>) -> Tape<S, G> {
+fn sum_swaps<S: Clone, G: Clone>(poly: &Polynomial<S>, right: &Monomial<S>) -> Tape<S, G> {
     let mut terms = polynomial_monomials(poly);
     if terms.is_empty() {
         return Tape::IdZero;
@@ -509,7 +511,7 @@ fn sum_swaps<S: Clone, G>(poly: &Polynomial<S>, right: &Monomial<S>) -> Tape<S, 
     for term in terms {
         let left_types = monomial_atom_sorts(&term);
         let swap = Tape::EmbedCircuit(Box::new(Circuit::swap_blocks(&left_types, &right_types)));
-        acc = Tape::Sum(Box::new(acc), Box::new(swap));
+        acc = Tape::sum(acc, swap);
     }
     acc
 }
