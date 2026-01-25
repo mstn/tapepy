@@ -17,7 +17,7 @@ pub trait GeneratorTypes<S> {
     fn output_types(&self) -> Option<Vec<S>>;
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Hash)]
 pub enum Monomial<S> {
     One,
     Atom(S),
@@ -38,7 +38,7 @@ impl<S: fmt::Display> fmt::Display for Monomial<S> {
     }
 }
 
-impl<S: fmt::Display> fmt::Display for Polynomial<S> {
+impl<S: fmt::Display + Clone> fmt::Display for Polynomial<S> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let mut parts = Vec::new();
         collect_polynomial_terms(self, &mut parts);
@@ -59,6 +59,27 @@ fn collect_monomial_parts<S: fmt::Display>(mono: &Monomial<S>, parts: &mut Vec<S
         }
     }
 }
+
+fn monomial_sorts<S: Clone>(mono: &Monomial<S>) -> Vec<S> {
+    match mono {
+        Monomial::One => Vec::new(),
+        Monomial::Atom(sort) => vec![sort.clone()],
+        Monomial::Product(left, right) => {
+            let mut parts = monomial_sorts(left);
+            parts.extend(monomial_sorts(right));
+            parts
+        }
+    }
+}
+
+// Note: equality is associative, so (a*b)*c == a*(b*c). We compare flattened sort lists.
+impl<S: PartialEq + Clone> PartialEq for Monomial<S> {
+    fn eq(&self, other: &Self) -> bool {
+        monomial_sorts(self) == monomial_sorts(other)
+    }
+}
+
+impl<S: Eq + Clone> Eq for Monomial<S> {}
 
 impl<S> Monomial<S> {
     pub fn one() -> Self {
@@ -110,13 +131,16 @@ impl<S> From<S> for Monomial<S> {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub enum Polynomial<S> {
+pub enum Polynomial<S: Clone> {
     Zero,
     Monomial(Monomial<S>),
     Sum(Box<Polynomial<S>>, Box<Polynomial<S>>),
 }
 
-fn collect_polynomial_terms<S: fmt::Display>(poly: &Polynomial<S>, parts: &mut Vec<String>) {
+fn collect_polynomial_terms<S: fmt::Display + Clone>(
+    poly: &Polynomial<S>,
+    parts: &mut Vec<String>,
+) {
     match poly {
         Polynomial::Zero => {}
         Polynomial::Monomial(term) => parts.push(term.to_string()),
@@ -127,7 +151,7 @@ fn collect_polynomial_terms<S: fmt::Display>(poly: &Polynomial<S>, parts: &mut V
     }
 }
 
-impl<S> Polynomial<S> {
+impl<S: Clone> Polynomial<S> {
     pub fn zero() -> Self {
         Polynomial::Zero
     }

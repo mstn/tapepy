@@ -3,8 +3,8 @@ use std::fmt::{self, Debug, Display};
 
 use super::{compose_lax_unchecked, Circuit, GeneratorShape, GeneratorTypes, Monomial, Polynomial};
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum Tape<S, G> {
+#[derive(Clone, PartialEq, Eq)]
+pub enum Tape<S: Clone, G> {
     Id(Monomial<S>),
     IdZero,
     EmbedCircuit(Box<Circuit<S, G>>),
@@ -21,8 +21,14 @@ pub enum Tape<S, G> {
     Merge(Monomial<S>),
 }
 
+impl<S: Clone + PartialEq + Display, G: GeneratorTypes<S> + Display> fmt::Debug for Tape<S, G> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(&format_tape_tree(self, 0))
+    }
+}
+
 #[derive(Debug, Clone, PartialEq)]
-pub enum TapeEdge<S, G> {
+pub enum TapeEdge<S: Clone, G> {
     Embedded(OpenHypergraph<S, G>),
     Product(
         Box<OpenHypergraph<Monomial<S>, TapeEdge<S, G>>>,
@@ -30,7 +36,7 @@ pub enum TapeEdge<S, G> {
     ),
 }
 
-impl<S: fmt::Display, G: fmt::Display> fmt::Display for TapeEdge<S, G> {
+impl<S: fmt::Display + Clone, G: fmt::Display> fmt::Display for TapeEdge<S, G> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             TapeEdge::Embedded(child) => {
@@ -60,13 +66,21 @@ impl TapeArity {
     }
 }
 
-impl<S, G: GeneratorShape> Tape<S, G> {
+impl<S: Clone, G: GeneratorShape> Tape<S, G> {
     pub fn copy_wires(monomial: Monomial<S>) -> Tape<S, G>
     where
         S: Clone,
     {
         let atoms = monomial_atom_sorts(&monomial);
         Tape::EmbedCircuit(Box::new(Circuit::copy_wires(atoms)))
+    }
+
+    pub fn join_wires(monomial: Monomial<S>) -> Tape<S, G>
+    where
+        S: Clone,
+    {
+        let atoms = monomial_atom_sorts(&monomial);
+        Tape::EmbedCircuit(Box::new(Circuit::join_wires(atoms)))
     }
 
     pub fn arity(&self) -> TapeArity {
@@ -106,13 +120,10 @@ impl<S, G: GeneratorShape> Tape<S, G> {
             Tape::Sum(left, right) => {
                 let left_ty = left.arity();
                 let right_ty = right.arity();
-                if left_ty.inputs != right_ty.inputs || left_ty.outputs != right_ty.outputs {
-                    panic!(
-                        "sum arity mismatch: {}x{} vs {}x{}",
-                        left_ty.inputs, left_ty.outputs, right_ty.inputs, right_ty.outputs
-                    );
-                }
-                TapeArity::new(left_ty.inputs, left_ty.outputs)
+                TapeArity::new(
+                    left_ty.inputs + right_ty.inputs,
+                    left_ty.outputs + right_ty.outputs,
+                )
             }
             Tape::Discard(mono) => TapeArity::new(mono.len(), 0),
             Tape::Split(mono) => {
@@ -131,23 +142,17 @@ impl<S, G: GeneratorShape> Tape<S, G> {
 impl<S: Clone + PartialEq, G: GeneratorTypes<S>> Tape<S, G> {
     pub fn io_types(&self) -> Option<(Vec<Monomial<S>>, Vec<Monomial<S>>)> {
         match self {
-            Tape::Id(mono) => {
-                let atoms = monomial_atoms(mono);
-                Some((atoms.clone(), atoms))
-            }
+            Tape::Id(mono) => Some((vec![mono.clone()], vec![mono.clone()])),
             Tape::IdZero => Some((Vec::new(), Vec::new())),
             Tape::EmbedCircuit(circuit) => {
                 let (inputs, outputs) = circuit.io_types()?;
-                Some((
-                    inputs.into_iter().map(Monomial::atom).collect(),
-                    outputs.into_iter().map(Monomial::atom).collect(),
-                ))
+                let inputs = vec![Monomial::from_sorts(inputs)];
+                let outputs = vec![Monomial::from_sorts(outputs)];
+                Some((inputs, outputs))
             }
             Tape::Swap { left, right } => {
-                let mut inputs = monomial_atoms(left);
-                inputs.extend(monomial_atoms(right));
-                let mut outputs = monomial_atoms(right);
-                outputs.extend(monomial_atoms(left));
+                let inputs = vec![left.clone(), right.clone()];
+                let outputs = vec![right.clone(), left.clone()];
                 Some((inputs, outputs))
             }
             Tape::Seq(left, right) => {
@@ -161,10 +166,14 @@ impl<S: Clone + PartialEq, G: GeneratorTypes<S>> Tape<S, G> {
             Tape::Product(left, right) => {
                 let (left_in, left_out) = left.io_types()?;
                 let (right_in, right_out) = right.io_types()?;
-                let mut inputs = left_in;
-                inputs.extend(right_in);
-                let mut outputs = left_out;
-                outputs.extend(right_out);
+                let inputs = Polynomial::into_monomials(Polynomial::product(
+                    Polynomial::from_monomials(left_in),
+                    Polynomial::from_monomials(right_in),
+                ));
+                let outputs = Polynomial::into_monomials(Polynomial::product(
+                    Polynomial::from_monomials(left_out),
+                    Polynomial::from_monomials(right_out),
+                ));
                 Some((inputs, outputs))
             }
             Tape::Sum(left, right) => {
@@ -176,25 +185,25 @@ impl<S: Clone + PartialEq, G: GeneratorTypes<S>> Tape<S, G> {
                 outputs.extend(right_out);
                 Some((inputs, outputs))
             }
-            Tape::Discard(mono) => Some((monomial_atoms(mono), Vec::new())),
+            Tape::Discard(mono) => Some((vec![mono.clone()], Vec::new())),
             Tape::Split(mono) => {
-                let atoms = monomial_atoms(mono);
-                let mut outputs = atoms.clone();
-                outputs.extend(atoms.clone());
-                Some((atoms, outputs))
+                let inputs = vec![mono.clone()];
+                let outputs = vec![mono.clone(), mono.clone()];
+                Some((inputs, outputs))
             }
-            Tape::Create(mono) => Some((Vec::new(), monomial_atoms(mono))),
+            Tape::Create(mono) => Some((Vec::new(), vec![mono.clone()])),
             Tape::Merge(mono) => {
-                let atoms = monomial_atoms(mono);
-                let mut inputs = atoms.clone();
-                inputs.extend(atoms.clone());
-                Some((inputs, atoms))
+                let outputs = vec![mono.clone()];
+                let inputs = vec![mono.clone(), mono.clone()];
+                Some((inputs, outputs))
             }
         }
     }
 }
 
-impl<S: Clone + PartialEq + Debug + Display, G: GeneratorTypes<S> + Clone + Display> Tape<S, G> {
+impl<S: Clone + PartialEq + Debug + Display, G: Debug + GeneratorTypes<S> + Clone + Display>
+    Tape<S, G>
+{
     pub fn validate(&self) -> Result<(), TapeValidationError<S>> {
         validate_tape(self, &mut Vec::new())
     }
@@ -213,7 +222,18 @@ impl<S: Clone + PartialEq + Debug + Display, G: GeneratorTypes<S> + Clone + Disp
 
         let left = t2.left_whisk(&p1);
         let right = t1.right_whisk(&q2);
-        Tape::seq(left, right)
+        let tape = Tape::seq(left.clone(), right.clone());
+
+        if let Err(err) = tape.validate() {
+            println!("{:?}", t1);
+            println!("{:?}", t2);
+            println!("============");
+            println!("{:?}", left);
+            println!("{:?}", right);
+            panic!("product invalid:\n{}", err);
+        }
+
+        return tape;
     }
 }
 
@@ -224,7 +244,7 @@ pub trait Whisker<Rhs> {
     fn right_whisk(&self, rhs: &Rhs) -> Self::Output;
 }
 
-impl<S: Clone, G: Clone> Tape<S, G> {
+impl<S: Clone, G> Tape<S, G> {
     pub fn sum(left: Tape<S, G>, right: Tape<S, G>) -> Tape<S, G> {
         match (left, right) {
             (Tape::IdZero, right) => right,
@@ -279,7 +299,10 @@ impl<S: Clone, G: Clone> Tape<S, G> {
         Tape::seq(left_dist, Tape::seq(mid, right_dist))
     }
 
-    fn left_whisk_poly(&self, poly: &Polynomial<S>) -> Tape<S, G> {
+    fn left_whisk_poly(&self, poly: &Polynomial<S>) -> Tape<S, G>
+    where
+        G: Clone,
+    {
         match poly {
             Polynomial::Zero => Tape::IdZero,
             Polynomial::Monomial(term) => self.left_whisk_mono(term),
@@ -289,7 +312,10 @@ impl<S: Clone, G: Clone> Tape<S, G> {
         }
     }
 
-    fn left_whisk_mono(&self, left: &Monomial<S>) -> Tape<S, G> {
+    fn left_whisk_mono(&self, left: &Monomial<S>) -> Tape<S, G>
+    where
+        G: Clone,
+    {
         match self {
             Tape::IdZero => Tape::IdZero,
             Tape::EmbedCircuit(circuit) => {
@@ -324,7 +350,10 @@ impl<S: Clone, G: Clone> Tape<S, G> {
         }
     }
 
-    fn right_whisk_mono(&self, right: &Monomial<S>) -> Tape<S, G> {
+    fn right_whisk_mono(&self, right: &Monomial<S>) -> Tape<S, G>
+    where
+        G: Clone,
+    {
         match self {
             Tape::IdZero => Tape::IdZero,
             Tape::EmbedCircuit(circuit) => {
@@ -655,6 +684,52 @@ fn format_monomials<S: Display>(monos: &[Monomial<S>]) -> String {
     parts.join(" + ")
 }
 
+fn format_sorts<S: Display>(sorts: &[S]) -> String {
+    if sorts.is_empty() {
+        return "1".to_string();
+    }
+    let mut parts = Vec::with_capacity(sorts.len());
+    for sort in sorts {
+        parts.push(format!("{}", sort));
+    }
+    parts.join(" * ")
+}
+
+fn format_circuit_tree<S: Clone + PartialEq + Display, G: GeneratorTypes<S> + Display>(
+    circuit: &Circuit<S, G>,
+    indent: usize,
+) -> String {
+    let pad = "  ".repeat(indent);
+    let io = circuit
+        .io_types()
+        .map(|(i, o)| format!(" [in: {}, out: {}]", format_sorts(&i), format_sorts(&o)));
+    let io = io.unwrap_or_else(|| " [in: ?, out: ?]".to_string());
+
+    match circuit {
+        Circuit::Id(sort) => format!("{}Id({}){}", pad, sort, io),
+        Circuit::IdOne => format!("{}IdOne{}", pad, io),
+        Circuit::Generator(gen) => format!("{}Gen({}){}", pad, gen, io),
+        Circuit::Swap { left, right } => format!("{}Swap({}, {}){}", pad, left, right, io),
+        Circuit::Copy(sort) => format!("{}Copy({}){}", pad, sort, io),
+        Circuit::Discard(sort) => format!("{}Discard({}){}", pad, sort, io),
+        Circuit::Join(sort) => format!("{}Join({}){}", pad, sort, io),
+        Circuit::Seq(left, right) => format!(
+            "{}Seq{}\n{}\n{}",
+            pad,
+            io,
+            format_circuit_tree(left, indent + 1),
+            format_circuit_tree(right, indent + 1)
+        ),
+        Circuit::Product(left, right) => format!(
+            "{}Product{}\n{}\n{}",
+            pad,
+            io,
+            format_circuit_tree(left, indent + 1),
+            format_circuit_tree(right, indent + 1)
+        ),
+    }
+}
+
 fn format_tape_tree<S: Clone + PartialEq + Display, G: GeneratorTypes<S> + Display>(
     tape: &Tape<S, G>,
     indent: usize,
@@ -672,7 +747,12 @@ fn format_tape_tree<S: Clone + PartialEq + Display, G: GeneratorTypes<S> + Displ
     match tape {
         Tape::Id(mono) => format!("{}Id({}){}", pad, mono, io),
         Tape::IdZero => format!("{}IdZero{}", pad, io),
-        Tape::EmbedCircuit(circuit) => format!("{}EmbedCircuit({}){}", pad, circuit, io),
+        Tape::EmbedCircuit(circuit) => format!(
+            "{}EmbedCircuit{}\n{}",
+            pad,
+            io,
+            format_circuit_tree(circuit, indent + 1)
+        ),
         Tape::Swap { left, right } => {
             format!("{}Swap({}, {}){}", pad, left, right, io)
         }

@@ -2,7 +2,6 @@ use crate::command_typing::{CommandChild, CommandDerivationTree, CommandForm};
 use crate::expression_circuit::{self, ExprGenerator};
 use crate::predicate_tape::{tape_from_predicate, tape_from_predicate_with_negation};
 use crate::tape_language::{Circuit, Monomial, Tape};
-use crate::tape_language::tape::monomial_atoms;
 use crate::types::TypeExpr;
 
 pub fn tape_from_command(tree: &CommandDerivationTree) -> Tape<TypeExpr, ExprGenerator> {
@@ -60,10 +59,7 @@ fn assignment_tape(tree: &CommandDerivationTree, name: &str) -> Tape<TypeExpr, E
 
     let left_copy = Circuit::copy_wires(left_types);
     let right_copy = Circuit::copy_wires(right_types);
-    let split = Circuit::product(
-        left_copy,
-        Circuit::product(Circuit::Id(lhs_ty), right_copy),
-    );
+    let split = Circuit::product(left_copy, Circuit::product(Circuit::Id(lhs_ty), right_copy));
 
     let updated = Circuit::product(left_id, Circuit::product(expr_circuit, right_id));
 
@@ -103,17 +99,8 @@ fn if_tape(tree: &CommandDerivationTree) -> Tape<TypeExpr, ExprGenerator> {
     let left = gate_tape(&context, pred_tape, then_tape);
     let right = gate_tape(&context, neg_pred_tape, else_tape);
 
-    let context_types = monomial_atoms(&context)
-        .into_iter()
-        .map(|mono| match mono {
-            Monomial::Atom(ty) => ty,
-            Monomial::One | Monomial::Product(_, _) => {
-                panic!("context monomial atoms must be flat")
-            }
-        })
-        .collect::<Vec<_>>();
-    let copy = Tape::EmbedCircuit(Box::new(Circuit::copy_wires(context_types.clone())));
-    let join = Tape::EmbedCircuit(Box::new(Circuit::join_wires(context_types)));
+    let copy = Tape::copy_wires(context.clone());
+    let join = Tape::join_wires(context);
     let branches = Tape::Sum(Box::new(left), Box::new(right));
     Tape::Seq(
         Box::new(copy),
@@ -126,21 +113,12 @@ fn gate_tape(
     pred_tape: Tape<TypeExpr, ExprGenerator>,
     exec_tape: Tape<TypeExpr, ExprGenerator>,
 ) -> Tape<TypeExpr, ExprGenerator> {
-    let context_types = monomial_atoms(&context)
-        .into_iter()
-        .map(|mono| match mono {
-            Monomial::Atom(ty) => ty,
-            Monomial::One | Monomial::Product(_, _) => {
-                panic!("context monomial atoms must be flat")
-            }
-        })
-        .collect::<Vec<_>>();
-    let copy = Tape::EmbedCircuit(Box::new(Circuit::copy_wires(context_types)));
-    let product = Tape::product(&pred_tape, &exec_tape);
-    Tape::Seq(
-        Box::new(copy),
-        Box::new(product),
-    )
+    let id_context = Tape::Id(context.clone());
+    let filter = Tape::seq(
+        Tape::copy_wires(context.clone()),
+        Tape::product(&pred_tape, &id_context),
+    );
+    Tape::seq(filter, exec_tape)
 }
 
 fn context_monomial(tree: &CommandDerivationTree) -> Monomial<TypeExpr> {
