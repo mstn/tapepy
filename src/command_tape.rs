@@ -99,12 +99,13 @@ fn if_tape(tree: &CommandDerivationTree) -> Tape<TypeExpr, ExprGenerator> {
     let left = gate_tape(&context, pred_tape, then_tape);
     let right = gate_tape(&context, neg_pred_tape, else_tape);
 
-    let copy = Tape::copy_wires(context.clone());
-    let join = Tape::join_wires(context);
     let branches = Tape::Sum(Box::new(left), Box::new(right));
     Tape::Seq(
-        Box::new(copy),
-        Box::new(Tape::Seq(Box::new(branches), Box::new(join))),
+        Box::new(Tape::Split(context.clone())),
+        Box::new(Tape::Seq(
+            Box::new(branches),
+            Box::new(Tape::Merge(context.clone())),
+        )),
     )
 }
 
