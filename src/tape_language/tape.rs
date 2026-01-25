@@ -209,12 +209,6 @@ impl<S: Clone + PartialEq + Debug + Display, G: Debug + GeneratorTypes<S> + Clon
     }
 
     pub fn product(t1: &Tape<S, G>, t2: &Tape<S, G>) -> Tape<S, G> {
-        if let Err(err) = t1.validate() {
-            panic!("product left tape invalid:\n{}", err);
-        }
-        if let Err(err) = t2.validate() {
-            panic!("product right tape invalid:\n{}", err);
-        }
         let (p1_in, _q1_out) = t1.io_types().expect("product requires io types");
         let (_p2_in, q2_out) = t2.io_types().expect("product requires io types");
         let p1 = Polynomial::from_monomials(p1_in);
