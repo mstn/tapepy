@@ -36,6 +36,12 @@ pub enum TapeEdge<S: Clone, G> {
     ),
 }
 
+#[derive(Debug, Clone, PartialEq)]
+pub enum FlatTapeEdge<G> {
+    Atom(G),
+    Plus,
+}
+
 impl<S: fmt::Display + Clone, G: fmt::Display> fmt::Display for TapeEdge<S, G> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
@@ -50,6 +56,15 @@ impl<S: fmt::Display + Clone, G: fmt::Display> fmt::Display for TapeEdge<S, G> {
                 right.sources.len(),
                 right.targets.len()
             ),
+        }
+    }
+}
+
+impl<G: fmt::Display> fmt::Display for FlatTapeEdge<G> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            FlatTapeEdge::Atom(gen) => write!(f, "{}", gen),
+            FlatTapeEdge::Plus => write!(f, "+"),
         }
     }
 }
@@ -962,6 +977,111 @@ impl<
             }
         }
     }
+
+    pub fn to_flat_hypergraph(
+        &self,
+        fresh_sort: &mut impl FnMut() -> S,
+    ) -> OpenHypergraph<Monomial<S>, FlatTapeEdge<G>> {
+        match self {
+            Tape::Id(mono) => OpenHypergraph::identity(monomial_atoms(mono)),
+            Tape::IdZero => OpenHypergraph::empty(),
+            Tape::EmbedCircuit(circuit) => match circuit.as_ref() {
+                Circuit::Id(sort) => OpenHypergraph::identity(vec![Monomial::atom(sort.clone())]),
+                Circuit::IdOne => OpenHypergraph::empty(),
+                _ => {
+                    let child_graph = circuit.to_hypergraph(fresh_sort);
+                    child_graph
+                        .map_nodes(|sort| Monomial::atom(sort.clone()))
+                        .map_edges(|gen| FlatTapeEdge::Atom(gen.clone()))
+                }
+            },
+            Tape::Swap { left, right } => {
+                let mut graph = OpenHypergraph::empty();
+                let left_nodes = add_nodes(&mut graph, &monomial_atoms(left));
+                let right_nodes = add_nodes(&mut graph, &monomial_atoms(right));
+                graph.sources = left_nodes
+                    .iter()
+                    .chain(right_nodes.iter())
+                    .copied()
+                    .collect();
+                graph.targets = right_nodes
+                    .into_iter()
+                    .chain(left_nodes.into_iter())
+                    .collect();
+                graph
+            }
+            Tape::Seq(left, right) => {
+                let left_graph = left.to_flat_hypergraph(fresh_sort);
+                let right_graph = right.to_flat_hypergraph(fresh_sort);
+                compose_lax_unchecked(&left_graph, &right_graph)
+            }
+            Tape::Product(left, right) | Tape::Sum(left, right) => {
+                let left_graph = left.to_flat_hypergraph(fresh_sort);
+                let right_graph = right.to_flat_hypergraph(fresh_sort);
+                left_graph.tensor(&right_graph)
+            }
+            Tape::Discard(mono) => {
+                let mut graph = OpenHypergraph::empty();
+                graph.sources = add_nodes(&mut graph, &monomial_atoms(mono));
+                graph.targets = Vec::new();
+                graph
+            }
+            Tape::Split(mono) => {
+                let labels = monomial_atoms(mono);
+                if labels.is_empty() {
+                    return OpenHypergraph::empty();
+                }
+                let mut graph = OpenHypergraph::empty();
+                let mut sources = Vec::with_capacity(labels.len());
+                let mut targets_left = Vec::with_capacity(labels.len());
+                let mut targets_right = Vec::with_capacity(labels.len());
+                for label in &labels {
+                    let source = graph.new_node(label.clone());
+                    let left = graph.new_node(label.clone());
+                    let right = graph.new_node(label.clone());
+                    graph.new_edge(FlatTapeEdge::Plus, (vec![source], vec![left, right]));
+                    sources.push(source);
+                    targets_left.push(left);
+                    targets_right.push(right);
+                }
+                let mut targets = targets_left;
+                targets.extend(targets_right);
+                graph.sources = sources;
+                graph.targets = targets;
+                graph
+            }
+            Tape::Create(mono) => {
+                let mut graph = OpenHypergraph::empty();
+                graph.sources = Vec::new();
+                graph.targets = add_nodes(&mut graph, &monomial_atoms(mono));
+                graph
+            }
+            Tape::Merge(mono) => {
+                let labels = monomial_atoms(mono);
+                if labels.is_empty() {
+                    return OpenHypergraph::empty();
+                }
+                let mut graph = OpenHypergraph::empty();
+                let mut sources_left = Vec::with_capacity(labels.len());
+                let mut sources_right = Vec::with_capacity(labels.len());
+                let mut targets = Vec::with_capacity(labels.len());
+                for label in &labels {
+                    let left = graph.new_node(label.clone());
+                    let right = graph.new_node(label.clone());
+                    let target = graph.new_node(label.clone());
+                    graph.new_edge(FlatTapeEdge::Plus, (vec![left, right], vec![target]));
+                    sources_left.push(left);
+                    sources_right.push(right);
+                    targets.push(target);
+                }
+                let mut sources = sources_left;
+                sources.extend(sources_right);
+                graph.sources = sources;
+                graph.targets = targets;
+                graph
+            }
+        }
+    }
 }
 
 fn interface_labels<S: Clone, G>(
@@ -1006,4 +1126,111 @@ fn add_nodes<S: Clone, G>(
         .iter()
         .map(|label| graph.new_node(label.clone()))
         .collect()
+}
+
+pub fn simplify_flat_plus_id<S: Clone + PartialEq, G: Clone>(
+    mut graph: OpenHypergraph<Monomial<S>, FlatTapeEdge<G>>,
+) -> OpenHypergraph<Monomial<S>, FlatTapeEdge<G>> {
+    let edge_count = graph.hypergraph.edges.len();
+    let node_count = graph.hypergraph.nodes.len();
+    let mut incident = vec![0usize; node_count];
+    for edge in &graph.hypergraph.adjacency {
+        for node in edge.sources.iter().chain(edge.targets.iter()) {
+            incident[node.0] += 1;
+        }
+    }
+
+    let mut remove = vec![false; edge_count];
+    let mut unify_pairs = Vec::new();
+
+    for split_idx in 0..edge_count {
+        if remove[split_idx] {
+            continue;
+        }
+        if !matches!(graph.hypergraph.edges[split_idx], FlatTapeEdge::Plus) {
+            continue;
+        }
+        let split_edge = &graph.hypergraph.adjacency[split_idx];
+        if split_edge.sources.len() != 1 || split_edge.targets.len() != 2 {
+            continue;
+        }
+        let mid = &split_edge.targets;
+        if mid.iter().any(|node| {
+            incident[node.0] != 2 || graph.sources.contains(node) || graph.targets.contains(node)
+        }) {
+            continue;
+        }
+
+        for merge_idx in 0..edge_count {
+            if split_idx == merge_idx || remove[merge_idx] {
+                continue;
+            }
+            if !matches!(graph.hypergraph.edges[merge_idx], FlatTapeEdge::Plus) {
+                continue;
+            }
+            let merge_edge = &graph.hypergraph.adjacency[merge_idx];
+            if merge_edge.sources.len() != 2 || merge_edge.targets.len() != 1 {
+                continue;
+            }
+            if merge_edge.sources != *mid {
+                continue;
+            }
+            remove[split_idx] = true;
+            remove[merge_idx] = true;
+            unify_pairs.push((split_edge.sources[0], merge_edge.targets[0]));
+            break;
+        }
+    }
+
+    if remove.iter().any(|&flag| flag) {
+        let mut edges = Vec::new();
+        let mut adjacency = Vec::new();
+        for idx in 0..edge_count {
+            if !remove[idx] {
+                edges.push(graph.hypergraph.edges[idx].clone());
+                adjacency.push(graph.hypergraph.adjacency[idx].clone());
+            }
+        }
+        graph.hypergraph.edges = edges;
+        graph.hypergraph.adjacency = adjacency;
+    }
+
+    for (lhs, rhs) in unify_pairs {
+        graph.hypergraph.unify(lhs, rhs);
+    }
+
+    let mut graph = OpenHypergraph::from_strict(graph.to_strict());
+
+    let node_count = graph.hypergraph.nodes.len();
+    let mut keep = vec![false; node_count];
+    for node in graph.sources.iter().chain(graph.targets.iter()).chain(
+        graph
+            .hypergraph
+            .adjacency
+            .iter()
+            .flat_map(|edge| edge.sources.iter().chain(edge.targets.iter())),
+    ) {
+        keep[node.0] = true;
+    }
+    if keep.iter().any(|&flag| !flag) {
+        let mut remap = vec![usize::MAX; node_count];
+        let mut new_nodes = Vec::new();
+        for (idx, label) in graph.hypergraph.nodes.iter().cloned().enumerate() {
+            if keep[idx] {
+                remap[idx] = new_nodes.len();
+                new_nodes.push(label);
+            }
+        }
+        graph.hypergraph.nodes = new_nodes;
+        for edge in &mut graph.hypergraph.adjacency {
+            for node in edge.sources.iter_mut().chain(edge.targets.iter_mut()) {
+                node.0 = remap[node.0];
+            }
+        }
+        for node in graph.sources.iter_mut().chain(graph.targets.iter_mut()) {
+            node.0 = remap[node.0];
+        }
+    }
+
+    graph
 }

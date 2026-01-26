@@ -9,13 +9,26 @@ pub fn solve_and_strictify_program_tape(
     term: &OpenHypergraph<Monomial<TypeExpr>, TapeEdge<TypeExpr, ExprGenerator>>,
     constraints: &[TypeConstraint],
 ) -> OpenHypergraph<Monomial<TypeExpr>, TapeEdge<TypeExpr, ExprGenerator>> {
+    solve_program_tape_with_subst(term, constraints).0
+}
+
+pub fn solve_program_tape_with_subst(
+    term: &OpenHypergraph<Monomial<TypeExpr>, TapeEdge<TypeExpr, ExprGenerator>>,
+    constraints: &[TypeConstraint],
+) -> (
+    OpenHypergraph<Monomial<TypeExpr>, TapeEdge<TypeExpr, ExprGenerator>>,
+    TypeSubstitution,
+) {
     let (nodes, mut equations) = build_program_type_equations(term);
     equations.extend_from_slice(constraints);
     let subst = solve_type_equations(&nodes, &equations)
         .unwrap_or_else(|err| panic!("type solving failed for program tape: {}", err));
     let solved = apply_substitution_to_tape(term, &subst);
     let strict_inner = solved.map_edges(|edge| strictify_tape_edge(&edge));
-    OpenHypergraph::from_strict(strict_inner.to_strict())
+    (
+        OpenHypergraph::from_strict(strict_inner.to_strict()),
+        subst,
+    )
 }
 
 fn build_program_type_equations(
@@ -38,7 +51,7 @@ fn apply_substitution_to_tape(
         .map_edges(|edge| apply_substitution_to_edge(&edge, subst))
 }
 
-fn apply_substitution_to_monomial(
+pub(crate) fn apply_substitution_to_monomial(
     monomial: &Monomial<TypeExpr>,
     subst: &TypeSubstitution,
 ) -> Monomial<TypeExpr> {
