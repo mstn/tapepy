@@ -1,3 +1,4 @@
+use std::collections::BTreeSet;
 use std::fmt;
 
 use graphviz_rust::dot_structures::{
@@ -11,6 +12,7 @@ use graphviz_rust::{
 use open_hypergraphs::lax::OpenHypergraph;
 use open_hypergraphs_dot::{Options, Theme};
 
+use crate::hypergraph_utils::connected_components_with_edges;
 use crate::tape_language::{Monomial, TapeEdge};
 use crate::types::TypeExpr;
 
@@ -553,20 +555,86 @@ fn generate_tape_edge_clusters<G: Clone + fmt::Display>(
                     stmts.push(Stmt::Edge(edge));
                 }
 
-                for stmt in generate_node_stmts(&child_graph, &child_opts, &child_prefix) {
-                    cluster.add_stmt(stmt);
-                }
-                for stmt in generate_edge_stmts(&child_graph, &child_opts, &child_prefix) {
-                    cluster.add_stmt(stmt);
-                }
                 for stmt in generate_interface_stmts(&child_graph, &child_prefix) {
                     cluster.add_stmt(stmt);
                 }
-                for stmt in generate_connection_stmts(&child_graph, &child_prefix) {
-                    cluster.add_stmt(stmt);
+                let components = connected_components_with_edges(&child_graph);
+                let mut anchors = Vec::new();
+                for (component_idx, component) in components.iter().enumerate() {
+                    let component_id =
+                        format!("cluster_{}e_{}_cc_{}", prefix, edge_idx, component_idx);
+                    let mut component_cluster = Subgraph {
+                        id: Id::Plain(component_id),
+                        stmts: vec![
+                            Stmt::Attribute(Attribute(
+                                Id::Plain(String::from("label")),
+                                Id::Plain(String::from("\"\"")),
+                            )),
+                            Stmt::Attribute(Attribute(
+                                Id::Plain(String::from("style")),
+                                Id::Plain(String::from("dashed")),
+                            )),
+                        ],
+                    };
+
+                    let node_set: BTreeSet<usize> =
+                        component.nodes.iter().map(|node| node.0).collect();
+                    let edge_set: BTreeSet<usize> = component.edges.iter().cloned().collect();
+
+                    for stmt in generate_node_stmts_subset(
+                        &child_graph,
+                        &child_opts,
+                        &child_prefix,
+                        &node_set,
+                    ) {
+                        component_cluster.add_stmt(stmt);
+                    }
+                    for stmt in generate_edge_stmts_subset(
+                        &child_graph,
+                        &child_opts,
+                        &child_prefix,
+                        &edge_set,
+                    ) {
+                        component_cluster.add_stmt(stmt);
+                    }
+                    for stmt in
+                        generate_connection_stmts_subset(&child_graph, &child_prefix, &edge_set)
+                    {
+                        component_cluster.add_stmt(stmt);
+                    }
+                    for stmt in
+                        generate_quotient_stmts_subset(&child_graph, &child_prefix, &node_set)
+                    {
+                        component_cluster.add_stmt(stmt);
+                    }
+
+                    if let Some(node) = component.nodes.first() {
+                        anchors.push(format!("{}n_{}", child_prefix, node.0));
+                    } else if let Some(edge_idx) = component.edges.first() {
+                        anchors.push(format!("{}e_{}", child_prefix, edge_idx));
+                    }
+
+                    cluster.add_stmt(Stmt::Subgraph(component_cluster));
                 }
-                for stmt in generate_quotient_stmts(&child_graph, &child_prefix) {
-                    cluster.add_stmt(stmt);
+
+                for window in anchors.windows(2) {
+                    let edge = Edge {
+                        ty: EdgeTy::Pair(
+                            Vertex::N(NodeId(Id::Plain(window[0].clone()), None)),
+                            Vertex::N(NodeId(Id::Plain(window[1].clone()), None)),
+                        ),
+                        attributes: vec![
+                            Attribute(
+                                Id::Plain(String::from("style")),
+                                Id::Plain(String::from("invis")),
+                            ),
+                            Attribute(
+                                Id::Plain(String::from("constraint")),
+                                Id::Plain(String::from("true")),
+                            ),
+                        ],
+                    };
+                    cluster.add_stmt(Stmt::Edge(edge));
                 }
 
                 stmts.push(Stmt::Subgraph(cluster));
@@ -765,6 +833,33 @@ fn generate_node_stmts<O: Clone>(
     stmts
 }
 
+fn generate_node_stmts_subset<O: Clone>(
+    graph: &OpenHypergraph<O, CommandEdge>,
+    opts: &Options<O, CommandEdge>,
+    prefix: &str,
+    nodes: &BTreeSet<usize>,
+) -> Vec<Stmt> {
+    let mut stmts = Vec::new();
+    for &i in nodes.iter() {
+        let label = (opts.node_label)(&graph.hypergraph.nodes[i]);
+        let label = escape_dot_label(&label);
+        stmts.push(Stmt::Node(Node {
+            id: NodeId(Id::Plain(format!("{}n_{}", prefix, i)), None),
+            attributes: vec![
+                Attribute(
+                    Id::Plain(String::from("shape")),
+                    Id::Plain(String::from("point")),
+                ),
+                Attribute(
+                    Id::Plain(String::from("xlabel")),
+                    Id::Plain(format!("\"{}\"", label)),
+                ),
+            ],
+        }));
+    }
+    stmts
+}
+
 fn generate_edge_stmts<O: Clone>(
     graph: &OpenHypergraph<O, CommandEdge>,
     opts: &Options<O, CommandEdge>,
@@ -834,6 +929,74 @@ fn generate_edge_stmts<O: Clone>(
     stmts
 }
 
+fn generate_edge_stmts_subset<O: Clone>(
+    graph: &OpenHypergraph<O, CommandEdge>,
+    opts: &Options<O, CommandEdge>,
+    prefix: &str,
+    edges: &BTreeSet<usize>,
+) -> Vec<Stmt> {
+    let mut stmts = Vec::new();
+    for &i in edges.iter() {
+        let hyperedge = &graph.hypergraph.adjacency[i];
+        match &graph.hypergraph.edges[i] {
+            CommandEdge::Atom(_) => {
+                let raw_label = edge_label(&graph.hypergraph.edges[i], opts);
+                let label = escape_dot_label(&raw_label);
+                let hide_node = raw_label == "context";
+
+                let mut source_ports = String::new();
+                for j in 0..hyperedge.sources.len() {
+                    source_ports.push_str(&format!("<s_{j}> | "));
+                }
+                if !source_ports.is_empty() {
+                    source_ports.truncate(source_ports.len() - 3);
+                }
+
+                let mut target_ports = String::new();
+                for j in 0..hyperedge.targets.len() {
+                    target_ports.push_str(&format!("<t_{j}> | "));
+                }
+                if !target_ports.is_empty() {
+                    target_ports.truncate(target_ports.len() - 3);
+                }
+
+                let record_label = if source_ports.is_empty() && target_ports.is_empty() {
+                    format!("\"{}\"", label)
+                } else if source_ports.is_empty() {
+                    format!("\"{{ {} | {{ {} }} }}\"", label, target_ports)
+                } else if target_ports.is_empty() {
+                    format!("\"{{ {{ {} }} | {} }}\"", source_ports, label)
+                } else {
+                    format!(
+                        "\"{{ {{ {} }} | {} | {{ {} }} }}\"",
+                        source_ports, label, target_ports
+                    )
+                };
+
+                let mut attributes = vec![
+                    Attribute(Id::Plain(String::from("label")), Id::Plain(record_label)),
+                    Attribute(
+                        Id::Plain(String::from("shape")),
+                        Id::Plain(String::from("record")),
+                    ),
+                ];
+                if hide_node {
+                    attributes.push(Attribute(
+                        Id::Plain(String::from("style")),
+                        Id::Plain(String::from("invis")),
+                    ));
+                }
+                stmts.push(Stmt::Node(Node {
+                    id: NodeId(Id::Plain(format!("{}e_{}", prefix, i)), None),
+                    attributes,
+                }));
+            }
+            CommandEdge::Embedded(_) => {}
+        }
+    }
+    stmts
+}
+
 fn generate_connection_stmts<O: Clone>(
     graph: &OpenHypergraph<O, CommandEdge>,
     prefix: &str,
@@ -841,6 +1004,48 @@ fn generate_connection_stmts<O: Clone>(
     let mut stmts = Vec::new();
 
     for (i, hyperedge) in graph.hypergraph.adjacency.iter().enumerate() {
+        if !matches!(graph.hypergraph.edges[i], CommandEdge::Atom(_)) {
+            continue;
+        }
+        for (j, &node_id) in hyperedge.sources.iter().enumerate() {
+            let node_idx = node_id.0;
+            let port = Some(Port(None, Some(format!("s_{}", j))));
+            let edge = Edge {
+                ty: EdgeTy::Pair(
+                    Vertex::N(NodeId(Id::Plain(format!("{}n_{}", prefix, node_idx)), None)),
+                    Vertex::N(NodeId(Id::Plain(format!("{}e_{}", prefix, i)), port)),
+                ),
+                attributes: vec![],
+            };
+            stmts.push(Stmt::Edge(edge));
+        }
+
+        for (j, &node_id) in hyperedge.targets.iter().enumerate() {
+            let node_idx = node_id.0;
+            let port = Some(Port(None, Some(format!("t_{}", j))));
+            let edge = Edge {
+                ty: EdgeTy::Pair(
+                    Vertex::N(NodeId(Id::Plain(format!("{}e_{}", prefix, i)), port)),
+                    Vertex::N(NodeId(Id::Plain(format!("{}n_{}", prefix, node_idx)), None)),
+                ),
+                attributes: vec![],
+            };
+            stmts.push(Stmt::Edge(edge));
+        }
+    }
+
+    stmts
+}
+
+fn generate_connection_stmts_subset<O: Clone>(
+    graph: &OpenHypergraph<O, CommandEdge>,
+    prefix: &str,
+    edges: &BTreeSet<usize>,
+) -> Vec<Stmt> {
+    let mut stmts = Vec::new();
+
+    for &i in edges.iter() {
+        let hyperedge = &graph.hypergraph.adjacency[i];
         if !matches!(graph.hypergraph.edges[i], CommandEdge::Atom(_)) {
             continue;
         }
@@ -987,6 +1192,48 @@ fn generate_interface_stmts<O: Clone>(
     stmts
 }
 
+fn generate_quotient_stmts_subset<O: Clone>(
+    graph: &OpenHypergraph<O, CommandEdge>,
+    prefix: &str,
+    nodes: &BTreeSet<usize>,
+) -> Vec<Stmt> {
+    let mut stmts = Vec::new();
+    let (lefts, rights) = &graph.hypergraph.quotient;
+    let mut unified_nodes = std::collections::BTreeSet::new();
+
+    for (left, right) in lefts.iter().zip(rights.iter()) {
+        let left_idx = left.0;
+        let right_idx = right.0;
+        if !nodes.contains(&left_idx) || !nodes.contains(&right_idx) {
+            continue;
+        }
+        let pair_key = if left_idx < right_idx {
+            (left_idx, right_idx)
+        } else {
+            (right_idx, left_idx)
+        };
+
+        if unified_nodes.insert(pair_key) {
+            let edge = Edge {
+                ty: EdgeTy::Pair(
+                    Vertex::N(NodeId(Id::Plain(format!("{}n_{}", prefix, left_idx)), None)),
+                    Vertex::N(NodeId(
+                        Id::Plain(format!("{}n_{}", prefix, right_idx)),
+                        None,
+                    )),
+                ),
+                attributes: vec![Attribute(
+                    Id::Plain(String::from("style")),
+                    Id::Plain(String::from("dotted")),
+                )],
+            };
+            stmts.push(Stmt::Edge(edge));
+        }
+    }
+
+    stmts
+}
+
 fn generate_quotient_stmts<O: Clone>(
     graph: &OpenHypergraph<O, CommandEdge>,
     prefix: &str,
@@ -1106,17 +1353,73 @@ fn generate_edge_clusters<O: Clone>(
                     };
                     stmts.push(Stmt::Edge(edge));
                 }
-                for stmt in generate_node_stmts(&child, &child_opts, &child_prefix) {
-                    cluster.add_stmt(stmt);
+                let components = connected_components_with_edges(&child);
+                let mut anchors = Vec::new();
+                for (component_idx, component) in components.iter().enumerate() {
+                    let component_id =
+                        format!("cluster_{}e_{}_cc_{}", prefix, edge_idx, component_idx);
+                    let mut component_cluster = Subgraph {
+                        id: Id::Plain(component_id),
+                        stmts: vec![
+                            Stmt::Attribute(Attribute(
+                                Id::Plain(String::from("label")),
+                                Id::Plain(String::from("\"\"")),
+                            )),
+                            Stmt::Attribute(Attribute(
+                                Id::Plain(String::from("style")),
+                                Id::Plain(String::from("dashed")),
+                            )),
+                        ],
+                    };
+
+                    let node_set: BTreeSet<usize> =
+                        component.nodes.iter().map(|node| node.0).collect();
+                    let edge_set: BTreeSet<usize> = component.edges.iter().cloned().collect();
+
+                    for stmt in
+                        generate_node_stmts_subset(&child, &child_opts, &child_prefix, &node_set)
+                    {
+                        component_cluster.add_stmt(stmt);
+                    }
+                    for stmt in
+                        generate_edge_stmts_subset(&child, &child_opts, &child_prefix, &edge_set)
+                    {
+                        component_cluster.add_stmt(stmt);
+                    }
+                    for stmt in generate_connection_stmts_subset(&child, &child_prefix, &edge_set) {
+                        component_cluster.add_stmt(stmt);
+                    }
+                    for stmt in generate_quotient_stmts_subset(&child, &child_prefix, &node_set) {
+                        component_cluster.add_stmt(stmt);
+                    }
+
+                    if let Some(node) = component.nodes.first() {
+                        anchors.push(format!("{}n_{}", child_prefix, node.0));
+                    } else if let Some(edge_idx) = component.edges.first() {
+                        anchors.push(format!("{}e_{}", child_prefix, edge_idx));
+                    }
+
+                    cluster.add_stmt(Stmt::Subgraph(component_cluster));
                 }
-                for stmt in generate_edge_stmts(&child, &child_opts, &child_prefix) {
-                    cluster.add_stmt(stmt);
-                }
-                for stmt in generate_connection_stmts(&child, &child_prefix) {
-                    cluster.add_stmt(stmt);
-                }
-                for stmt in generate_quotient_stmts(&child, &child_prefix) {
-                    cluster.add_stmt(stmt);
+
+                for window in anchors.windows(2) {
+                    let edge = Edge {
+                        ty: EdgeTy::Pair(
+                            Vertex::N(NodeId(Id::Plain(window[0].clone()), None)),
+                            Vertex::N(NodeId(Id::Plain(window[1].clone()), None)),
+                        ),
+                        attributes: vec![
+                            Attribute(
+                                Id::Plain(String::from("style")),
+                                Id::Plain(String::from("invis")),
+                            ),
+                            Attribute(
+                                Id::Plain(String::from("constraint")),
+                                Id::Plain(String::from("true")),
+                            ),
+                        ],
+                    };
+                    cluster.add_stmt(Stmt::Edge(edge));
                 }
                 stmts.push(Stmt::Subgraph(cluster));
             }
