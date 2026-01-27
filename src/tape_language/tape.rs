@@ -12,6 +12,10 @@ pub enum Tape<S: Clone, G> {
         left: Monomial<S>,
         right: Monomial<S>,
     },
+    Trace {
+        around: Monomial<S>,
+        tape: Box<Tape<S, G>>,
+    },
     Seq(Box<Tape<S, G>>, Box<Tape<S, G>>),
     Product(Box<Tape<S, G>>, Box<Tape<S, G>>),
     Sum(Box<Tape<S, G>>, Box<Tape<S, G>>),
@@ -113,6 +117,17 @@ impl<S: Clone, G: GeneratorShape> Tape<S, G> {
                 let inputs = left.len() + right.len();
                 TapeArity::new(inputs, inputs)
             }
+            Tape::Trace { around, tape } => {
+                let inner = tape.arity();
+                let around_len = around.len();
+                if inner.inputs < around_len || inner.outputs < around_len {
+                    panic!(
+                        "trace arity mismatch: inner {}x{}, around {}",
+                        inner.inputs, inner.outputs, around_len
+                    );
+                }
+                TapeArity::new(inner.inputs - around_len, inner.outputs - around_len)
+            }
             Tape::Seq(left, right) => {
                 let left_ty = left.arity();
                 let right_ty = right.arity();
@@ -169,6 +184,19 @@ impl<S: Clone + PartialEq, G: GeneratorTypes<S>> Tape<S, G> {
                 let inputs = vec![left.clone(), right.clone()];
                 let outputs = vec![right.clone(), left.clone()];
                 Some((inputs, outputs))
+            }
+            Tape::Trace { around, tape } => {
+                let (inputs, outputs) = tape.io_types()?;
+                let Some(input_head) = inputs.first() else {
+                    return None;
+                };
+                let Some(output_head) = outputs.first() else {
+                    return None;
+                };
+                if input_head != around || output_head != around {
+                    return None;
+                }
+                Some((inputs[1..].to_vec(), outputs[1..].to_vec()))
             }
             Tape::Seq(left, right) => {
                 let (left_in, left_out) = left.io_types()?;
@@ -263,6 +291,18 @@ impl<S: Clone, G> Tape<S, G> {
             (left, Tape::IdZero) => left,
             (left, right) => Tape::Sum(Box::new(left), Box::new(right)),
         }
+    }
+
+    pub fn trace_poly(poly: &Polynomial<S>, tape: Tape<S, G>) -> Tape<S, G> {
+        let (head, rest) = split_polynomial(poly);
+        let Some(head) = head else {
+            return tape;
+        };
+        let traced = Tape::Trace {
+            around: head,
+            tape: Box::new(tape),
+        };
+        Tape::trace_poly(&rest, traced)
     }
 
     pub fn seq(left: Tape<S, G>, right: Tape<S, G>) -> Tape<S, G> {
@@ -380,6 +420,10 @@ impl<S: Clone, G> Tape<S, G> {
                 Box::new(left_tape.left_whisk_mono(left)),
                 Box::new(right_tape.left_whisk_mono(left)),
             ),
+            Tape::Trace { around, tape } => Tape::Trace {
+                around: Monomial::product(left.clone(), around.clone()),
+                tape: Box::new(tape.left_whisk_mono(left)),
+            },
             Tape::Id(right) => Tape::Id(Monomial::product(left.clone(), right.clone())),
             Tape::Swap {
                 left: swap_left,
@@ -418,6 +462,10 @@ impl<S: Clone, G> Tape<S, G> {
                 Box::new(left_tape.right_whisk_mono(right)),
                 Box::new(right_tape.right_whisk_mono(right)),
             ),
+            Tape::Trace { around, tape } => Tape::Trace {
+                around: Monomial::product(around.clone(), right.clone()),
+                tape: Box::new(tape.right_whisk_mono(right)),
+            },
             Tape::Id(left) => Tape::Id(Monomial::product(left.clone(), right.clone())),
             Tape::Swap {
                 left: swap_left,
@@ -701,6 +749,33 @@ fn validate_tape<S: Clone + PartialEq + Debug + Display, G: GeneratorTypes<S> + 
             path.pop();
             Ok(())
         }
+        Tape::Trace { around, tape: inner } => {
+            path.push("Trace".to_string());
+            validate_tape(inner, path)?;
+            path.pop();
+
+            let Some((inputs, outputs)) = inner.io_types() else {
+                return Err(TapeValidationError {
+                    path: path.clone(),
+                    left_out: None,
+                    right_in: None,
+                    left_tape: Some(format_tape_tree(inner, 0)),
+                    right_tape: None,
+                    full_tape: format_tape_tree(tape, 0),
+                });
+            };
+            if inputs.first() != Some(around) || outputs.first() != Some(around) {
+                return Err(TapeValidationError {
+                    path: path.clone(),
+                    left_out: Some(inputs),
+                    right_in: Some(outputs),
+                    left_tape: Some(format_tape_tree(inner, 0)),
+                    right_tape: None,
+                    full_tape: format_tape_tree(tape, 0),
+                });
+            }
+            Ok(())
+        }
         Tape::EmbedCircuit(circuit) => {
             if circuit.io_types().is_none() {
                 return Err(TapeValidationError {
@@ -801,6 +876,13 @@ fn format_tape_tree<S: Clone + PartialEq + Display, G: GeneratorTypes<S> + Displ
         Tape::Swap { left, right } => {
             format!("{}Swap({}, {}){}", pad, left, right, io)
         }
+        Tape::Trace { around, tape } => format!(
+            "{}Trace({}){}\n{}",
+            pad,
+            around,
+            io,
+            format_tape_tree(tape, indent + 1)
+        ),
         Tape::Discard(mono) => format!("{}Discard({}){}", pad, mono, io),
         Tape::Split(mono) => format!("{}Split({}){}", pad, mono, io),
         Tape::Create(mono) => format!("{}Create({}){}", pad, mono, io),
@@ -926,6 +1008,26 @@ impl<
                     .collect();
                 graph
             }
+            Tape::Trace { around, tape } => {
+                let mut graph = tape.to_hypergraph(fresh_sort);
+                let around_len = monomial_atoms(around).len();
+                if graph.sources.len() < around_len || graph.targets.len() < around_len {
+                    panic!(
+                        "trace arity mismatch: sources {}, targets {}, around {}",
+                        graph.sources.len(),
+                        graph.targets.len(),
+                        around_len
+                    );
+                }
+                let sources = graph.sources.clone();
+                let targets = graph.targets.clone();
+                for idx in 0..around_len {
+                    graph.unify(sources[idx], targets[idx]);
+                }
+                graph.sources = sources[around_len..].to_vec();
+                graph.targets = targets[around_len..].to_vec();
+                graph
+            }
             Tape::Seq(left, right) => {
                 let left_graph = left.to_hypergraph(fresh_sort);
                 let right_graph = right.to_hypergraph(fresh_sort);
@@ -1008,6 +1110,26 @@ impl<
                     .into_iter()
                     .chain(left_nodes.into_iter())
                     .collect();
+                graph
+            }
+            Tape::Trace { around, tape } => {
+                let mut graph = tape.to_flat_hypergraph(fresh_sort);
+                let around_len = monomial_atoms(around).len();
+                if graph.sources.len() < around_len || graph.targets.len() < around_len {
+                    panic!(
+                        "trace arity mismatch: sources {}, targets {}, around {}",
+                        graph.sources.len(),
+                        graph.targets.len(),
+                        around_len
+                    );
+                }
+                let sources = graph.sources.clone();
+                let targets = graph.targets.clone();
+                for idx in 0..around_len {
+                    graph.unify(sources[idx], targets[idx]);
+                }
+                graph.sources = sources[around_len..].to_vec();
+                graph.targets = targets[around_len..].to_vec();
                 graph
             }
             Tape::Seq(left, right) => {
