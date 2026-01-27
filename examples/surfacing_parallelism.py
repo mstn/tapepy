@@ -7,9 +7,9 @@ else:
     x = x + 1
 
 if y > 0:
-    y = y - 1
+    y = y - 2
 else:
-    y = y + 1
+    y = y + 2
 
 x = x + y
 
