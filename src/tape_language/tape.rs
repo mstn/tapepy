@@ -305,6 +305,30 @@ impl<S: Clone, G> Tape<S, G> {
         Tape::trace_poly(&rest, traced)
     }
 
+    pub fn discard_poly(poly: &Polynomial<S>) -> Tape<S, G> {
+        let mut terms = polynomial_monomials(poly);
+        if terms.is_empty() {
+            return Tape::IdZero;
+        }
+        let mut acc = Tape::Discard(terms.remove(0));
+        for term in terms {
+            acc = Tape::sum(acc, Tape::Discard(term));
+        }
+        acc
+    }
+
+    pub fn create_poly(poly: &Polynomial<S>) -> Tape<S, G> {
+        let mut terms = polynomial_monomials(poly);
+        if terms.is_empty() {
+            return Tape::IdZero;
+        }
+        let mut acc = Tape::Create(terms.remove(0));
+        for term in terms {
+            acc = Tape::sum(acc, Tape::Create(term));
+        }
+        acc
+    }
+
     pub fn seq(left: Tape<S, G>, right: Tape<S, G>) -> Tape<S, G> {
         match (left, right) {
             (Tape::IdZero, Tape::IdZero) => Tape::IdZero,
@@ -482,6 +506,39 @@ impl<S: Clone, G> Tape<S, G> {
     }
 }
 
+impl<S: Clone + PartialEq + Debug + Display, G: GeneratorTypes<S> + Clone + Display> Tape<S, G> {
+    pub fn convolution(t1: Tape<S, G>, t2: Tape<S, G>) -> Tape<S, G> {
+        let (p1_in, q1_out) = t1.io_types().expect("convolution requires io types");
+        let (p2_in, q2_out) = t2.io_types().expect("convolution requires io types");
+        if p1_in != p2_in || q1_out != q2_out {
+            panic!("convolution requires matching input/output interfaces");
+        }
+        let p = Polynomial::from_monomials(p1_in);
+        let q = Polynomial::from_monomials(q1_out);
+        let split = split_poly(&p);
+        let join = merge_poly(&q);
+        Tape::seq(split, Tape::seq(Tape::sum(t1, t2), join))
+    }
+
+    pub fn zero(inputs: &Polynomial<S>, outputs: &Polynomial<S>) -> Tape<S, G> {
+        Tape::seq(Tape::discard_poly(inputs), Tape::create_poly(outputs))
+    }
+
+    pub fn kleene(tape: Tape<S, G>) -> Tape<S, G> {
+        let (inputs, outputs) = tape.io_types().expect("kleene requires io types");
+        if inputs.len() != 1 || outputs.len() != 1 || inputs[0] != outputs[0] {
+            panic!("kleene requires tape of type U -> U");
+        }
+        let u = inputs[0].clone();
+        let sum = Tape::sum(tape, Tape::Id(u.clone()));
+        let body = Tape::seq(sum, Tape::seq(Tape::Merge(u.clone()), Tape::Split(u.clone())));
+        Tape::Trace {
+            around: u,
+            tape: Box::new(body),
+        }
+    }
+}
+
 pub fn left_distributor<S: Clone, G: Clone>(
     poly: &Polynomial<S>,
     left: &Polynomial<S>,
@@ -612,6 +669,54 @@ fn id_poly<S: Clone, G: Clone>(poly: &Polynomial<S>) -> Tape<S, G> {
     let mut acc = Tape::Id(terms.remove(0));
     for term in terms {
         acc = Tape::sum(acc, Tape::Id(term));
+    }
+    acc
+}
+
+fn split_poly<S: Clone, G>(poly: &Polynomial<S>) -> Tape<S, G> {
+    let mut terms = polynomial_monomials(poly);
+    let Some(first) = terms.first().cloned() else {
+        return Tape::IdZero;
+    };
+    let mut acc_terms = vec![first.clone()];
+    let mut acc = Tape::Split(first);
+    for term in terms.into_iter().skip(1) {
+        let rest_poly = Polynomial::from_monomials(acc_terms.clone());
+        let term_poly = Polynomial::monomial(term.clone());
+        let combined = Tape::sum(acc, Tape::Split(term.clone()));
+
+        // Reorder outputs: P + P + T + T -> P + T + P + T.
+        let swap_mid = swap_sum_blocks(&rest_poly, &term_poly);
+        let reorder = Tape::sum(
+            id_poly(&rest_poly),
+            Tape::sum(swap_mid, Tape::Id(term.clone())),
+        );
+        acc = Tape::seq(combined, reorder);
+        acc_terms.push(term);
+    }
+    acc
+}
+
+fn merge_poly<S: Clone, G>(poly: &Polynomial<S>) -> Tape<S, G> {
+    let mut terms = polynomial_monomials(poly);
+    let Some(first) = terms.first().cloned() else {
+        return Tape::IdZero;
+    };
+    let mut acc_terms = vec![first.clone()];
+    let mut acc = Tape::Merge(first);
+    for term in terms.into_iter().skip(1) {
+        let rest_poly = Polynomial::from_monomials(acc_terms.clone());
+        let term_poly = Polynomial::monomial(term.clone());
+
+        // Reorder inputs: P + T + P + T -> P + P + T + T.
+        let swap_mid = swap_sum_blocks(&term_poly, &rest_poly);
+        let reorder = Tape::sum(
+            id_poly(&rest_poly),
+            Tape::sum(swap_mid, Tape::Id(term.clone())),
+        );
+        let combined = Tape::sum(acc, Tape::Merge(term));
+        acc = Tape::seq(reorder, combined);
+        acc_terms.push(term);
     }
     acc
 }
