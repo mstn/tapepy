@@ -1046,6 +1046,7 @@ fn tape_io_types(tape: &Tape<TypeExpr, ExprGenerator>) -> Option<(Vec<TypeExpr>,
             let atoms = monomial_atoms(mono);
             Some((atoms_to_types(&atoms), atoms_to_types(&atoms)))
         }
+        Tape::Trace { around, tape } => tape_io_types(tape),
     }
 }
 

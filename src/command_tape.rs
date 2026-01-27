@@ -27,7 +27,28 @@ pub fn tape_from_command(tree: &CommandDerivationTree) -> Tape<TypeExpr, ExprGen
         }
         CommandForm::If => if_tape(tree),
         CommandForm::While => {
-            panic!("while tapes not implemented yet");
+            let mut pred = None;
+            let mut body = None;
+            for child in tree.children() {
+                match child {
+                    CommandChild::Predicate(pred_tree) => pred = Some(pred_tree),
+                    CommandChild::Command(cmd) => body = Some(cmd),
+                    _ => {}
+                }
+            }
+            let pred = pred.expect("while expects predicate child");
+            let body = body.expect("while expects command body");
+
+            let context_entries = tree.judgment().context().entries();
+            let context = Monomial::from_context(context_entries);
+            let pred_tape = tape_from_predicate(pred);
+            let neg_pred_tape = tape_from_predicate_with_negation(pred, true);
+            let body_tape = tape_from_command(body);
+
+            let loop_body = gate_tape(&context, pred_tape, body_tape);
+            let kleene = Tape::kleene(loop_body);
+            let exit = gate_tape(&context, neg_pred_tape, Tape::Id(context.clone()));
+            Tape::seq(kleene, exit)
         }
     }
 }

@@ -3,7 +3,7 @@ use std::fmt;
 use rustpython_parser::ast::{Expr, ExprName, Stmt, StmtAssign, StmtIf, StmtWhile};
 
 use crate::context::Context;
-use crate::types::TypeExpr;
+use crate::types::{TypeConstraint, TypeExpr};
 use crate::typing::{
     infer_expression_in_context_with_state, infer_predicate_in_context_with_state, InferenceState,
     ConstraintStore, ContextSnapshot, DeductionTree,
@@ -38,6 +38,7 @@ pub struct CommandDerivationTree {
     judgment: CommandJudgment,
     children: Vec<CommandChild>,
     form: CommandForm,
+    constraints: ConstraintStore,
 }
 
 #[derive(Debug, Clone)]
@@ -75,6 +76,10 @@ impl CommandDerivationTree {
         &self.children
     }
 
+    pub fn constraints(&self) -> &ConstraintStore {
+        &self.constraints
+    }
+
     fn fmt_with_indent(&self, f: &mut fmt::Formatter<'_>, indent: usize) -> fmt::Result {
         for _ in 0..indent {
             write!(f, "  ")?;
@@ -105,6 +110,7 @@ pub fn collect_constraints(tree: &CommandDerivationTree) -> ConstraintStore {
 }
 
 fn collect_constraints_inner(tree: &CommandDerivationTree, store: &mut ConstraintStore) {
+    store.extend(tree.constraints());
     for child in &tree.children {
         match child {
             CommandChild::Command(cmd) => collect_constraints_inner(cmd, store),
@@ -221,10 +227,10 @@ fn infer_while(
     }
 
     let (body_tree, body_context) = infer_block(&while_stmt.body, context, state);
-    ensure_context_unchanged(context, &body_context);
+    let constraints = ensure_context_unchanged(context, &body_context);
     let cmd = format!("while {} do ...", pred_tree.judgment().expr());
     (
-        make_node(
+        make_node_with_constraints(
             "While",
             context,
             cmd,
@@ -232,6 +238,7 @@ fn infer_while(
                 CommandChild::Predicate(pred_tree),
                 CommandChild::Command(body_tree),
             ],
+            constraints,
             CommandForm::While,
         ),
         context.clone(),
@@ -283,6 +290,7 @@ fn make_leaf(
         },
         children: Vec::new(),
         form,
+        constraints: ConstraintStore::default(),
     }
 }
 
@@ -301,6 +309,27 @@ fn make_node(
         },
         children,
         form,
+        constraints: ConstraintStore::default(),
+    }
+}
+
+fn make_node_with_constraints(
+    rule: &'static str,
+    context: &Context,
+    command: String,
+    children: Vec<CommandChild>,
+    constraints: ConstraintStore,
+    form: CommandForm,
+) -> CommandDerivationTree {
+    CommandDerivationTree {
+        rule,
+        judgment: CommandJudgment {
+            context: ContextSnapshot::new(context.entries()),
+            command,
+        },
+        children,
+        form,
+        constraints,
     }
 }
 
@@ -325,7 +354,8 @@ fn merge_contexts(base: &Context, left: &Context, right: &Context) -> Context {
     merged
 }
 
-fn ensure_context_unchanged(before: &Context, after: &Context) {
+fn ensure_context_unchanged(before: &Context, after: &Context) -> ConstraintStore {
+    let mut constraints = ConstraintStore::default();
     for (name, _) in before.entries() {
         let before_ty = before
             .get(&name)
@@ -335,13 +365,9 @@ fn ensure_context_unchanged(before: &Context, after: &Context) {
             .get(&name)
             .cloned()
             .unwrap_or_else(|| panic!("missing `{}` in loop context", name));
-        if before_ty != after_ty {
-            panic!(
-                "type error: while body changes type of `{}` from {} to {}",
-                name, before_ty, after_ty
-            );
-        }
+        constraints.push(TypeConstraint::Equal(before_ty, after_ty));
     }
+    constraints
 }
 
 fn collect_free_vars_stmt(stmt: &Stmt, context: &mut Context) {

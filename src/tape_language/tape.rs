@@ -68,7 +68,7 @@ impl<G: fmt::Display> fmt::Display for FlatTapeEdge<G> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             FlatTapeEdge::Atom(gen) => write!(f, "{}", gen),
-            FlatTapeEdge::Plus => write!(f, "+"),
+            FlatTapeEdge::Plus => write!(f, "⊕"),
         }
     }
 }
@@ -526,12 +526,16 @@ impl<S: Clone + PartialEq + Debug + Display, G: GeneratorTypes<S> + Clone + Disp
 
     pub fn kleene(tape: Tape<S, G>) -> Tape<S, G> {
         let (inputs, outputs) = tape.io_types().expect("kleene requires io types");
-        if inputs.len() != 1 || outputs.len() != 1 || inputs[0] != outputs[0] {
+        if inputs.len() != 1 || outputs.len() != 1 {
+            println!("{:?}", tape);
             panic!("kleene requires tape of type U -> U");
         }
         let u = inputs[0].clone();
         let sum = Tape::sum(tape, Tape::Id(u.clone()));
-        let body = Tape::seq(sum, Tape::seq(Tape::Merge(u.clone()), Tape::Split(u.clone())));
+        let body = Tape::seq(
+            sum,
+            Tape::seq(Tape::Merge(u.clone()), Tape::Split(u.clone())),
+        );
         Tape::Trace {
             around: u,
             tape: Box::new(body),
@@ -673,7 +677,7 @@ fn id_poly<S: Clone, G: Clone>(poly: &Polynomial<S>) -> Tape<S, G> {
     acc
 }
 
-fn split_poly<S: Clone, G>(poly: &Polynomial<S>) -> Tape<S, G> {
+fn split_poly<S: Clone, G: Clone>(poly: &Polynomial<S>) -> Tape<S, G> {
     let mut terms = polynomial_monomials(poly);
     let Some(first) = terms.first().cloned() else {
         return Tape::IdZero;
@@ -697,7 +701,7 @@ fn split_poly<S: Clone, G>(poly: &Polynomial<S>) -> Tape<S, G> {
     acc
 }
 
-fn merge_poly<S: Clone, G>(poly: &Polynomial<S>) -> Tape<S, G> {
+fn merge_poly<S: Clone, G: Clone>(poly: &Polynomial<S>) -> Tape<S, G> {
     let mut terms = polynomial_monomials(poly);
     let Some(first) = terms.first().cloned() else {
         return Tape::IdZero;
@@ -714,7 +718,7 @@ fn merge_poly<S: Clone, G>(poly: &Polynomial<S>) -> Tape<S, G> {
             id_poly(&rest_poly),
             Tape::sum(swap_mid, Tape::Id(term.clone())),
         );
-        let combined = Tape::sum(acc, Tape::Merge(term));
+        let combined = Tape::sum(acc, Tape::Merge(term.clone()));
         acc = Tape::seq(reorder, combined);
         acc_terms.push(term);
     }
@@ -854,7 +858,10 @@ fn validate_tape<S: Clone + PartialEq + Debug + Display, G: GeneratorTypes<S> + 
             path.pop();
             Ok(())
         }
-        Tape::Trace { around, tape: inner } => {
+        Tape::Trace {
+            around,
+            tape: inner,
+        } => {
             path.push("Trace".to_string());
             validate_tape(inner, path)?;
             path.pop();
