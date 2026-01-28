@@ -14,6 +14,14 @@ The "surface parallelism" example is meant to illustrate this: for a carefully c
 
 Based on [open-hypergraphs](https://github.com/hellas-ai/open-hypergraphs).
 
+## Getting started
+
+Generate a diagram from the example program:
+
+```bash
+cargo run -- compile examples/surfacing_parallelism.py --format svg --output /tmp/surfacing_parallelism.svg
+```
+
 ## References
 
 1. Bonchi, Filippo, Alessandro Di Giorgio, and Elena Di Lavore. "A Diagrammatic Algebra for Program Logics." International Conference on Foundations of Software Science and Computation Structures. Cham: Springer Nature Switzerland, 2025. [pdf](https://arxiv.org/abs/2410.03561)
