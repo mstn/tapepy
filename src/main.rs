@@ -16,10 +16,7 @@ use std::error::Error;
 use std::path::PathBuf;
 
 use clap::{Parser, ValueEnum};
-use command_dot::{
-    generate_dot_with_clusters, generate_dot_with_tape_clusters, to_svg_with_clusters,
-    to_svg_with_tape_clusters, CommandEdge,
-};
+use command_dot::{generate_dot_with_clusters, to_svg_with_clusters, CommandEdge};
 use command_tape::tape_from_command;
 use command_typing::{collect_constraints, infer_command_from_suite};
 use graphviz_rust::printer::{DotPrinter, PrinterContext};
@@ -109,7 +106,7 @@ fn compile_file(
         types::TypeExpr::Var(types::TypeVar(id))
     });
 
-    let (graph, flat_graph) = if raw_tape {
+    let (_graph, flat_graph) = if raw_tape {
         (term, tape_language::simplify_flat_plus_id(flat_term))
     } else {
         let constraints = collect_constraints(&tree);
@@ -132,45 +129,10 @@ fn compile_file(
         ..Options::default()
     };
 
-    let flat_output = with_flat_suffix(output);
     match format {
-        OutputFormat::Dot => {
-            write_dot(&graph, &opts, output)?;
-            write_flat_dot(&flat_graph, &opts, &flat_output)
-        }
-        OutputFormat::Svg => {
-            write_svg(&graph, &opts, output)?;
-            write_flat_svg(&flat_graph, &opts, &flat_output)
-        }
+        OutputFormat::Dot => write_flat_dot(&flat_graph, &opts, output),
+        OutputFormat::Svg => write_flat_svg(&flat_graph, &opts, output),
     }
-}
-
-fn write_dot<E: Clone + std::fmt::Display>(
-    graph: &OpenHypergraph<
-        tape_language::Monomial<types::TypeExpr>,
-        tape_language::TapeEdge<types::TypeExpr, E>,
-    >,
-    opts: &Options<tape_language::Monomial<types::TypeExpr>, CommandEdge>,
-    output: &PathBuf,
-) -> Result<(), Box<dyn Error>> {
-    let dot_graph = generate_dot_with_tape_clusters(graph, opts);
-    let mut ctx = PrinterContext::default();
-    let dot_string = dot_graph.print(&mut ctx);
-    std::fs::write(output, dot_string)?;
-    Ok(())
-}
-
-fn write_svg<E: Clone + std::fmt::Display>(
-    graph: &OpenHypergraph<
-        tape_language::Monomial<types::TypeExpr>,
-        tape_language::TapeEdge<types::TypeExpr, E>,
-    >,
-    opts: &Options<tape_language::Monomial<types::TypeExpr>, CommandEdge>,
-    output: &PathBuf,
-) -> Result<(), Box<dyn Error>> {
-    let svg = to_svg_with_tape_clusters(graph, opts)?;
-    std::fs::write(output, svg)?;
-    Ok(())
 }
 
 fn write_flat_dot<E: Clone + std::fmt::Display>(
@@ -205,22 +167,4 @@ fn write_flat_svg<E: Clone + std::fmt::Display>(
     let svg = to_svg_with_clusters(&flat_graph, opts)?;
     std::fs::write(output, svg)?;
     Ok(())
-}
-
-fn with_flat_suffix(output: &PathBuf) -> PathBuf {
-    let mut path = output.clone();
-    let file_name = match output.file_name().and_then(|name| name.to_str()) {
-        Some(name) => name.to_string(),
-        None => return output.clone(),
-    };
-    let (base, ext) = match file_name.rsplit_once('.') {
-        Some((base, ext)) => (base.to_string(), Some(ext.to_string())),
-        None => (file_name, None),
-    };
-    let new_name = match ext {
-        Some(ext) => format!("{}.flat.{}", base, ext),
-        None => format!("{}.flat", base),
-    };
-    path.set_file_name(new_name);
-    path
 }
