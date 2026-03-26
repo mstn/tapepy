@@ -484,18 +484,18 @@ checksum = "384b8ab6d37215f3c5301a95a4accb5d64aa607f1fcb26a11b5303878451b4fe"
 
 [[package]]
 name = "open-hypergraphs"
-version = "0.2.9"
+version = "0.3.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8c1e6b890bbd53b03344882387c36bdc3be51b401bcdead164066e8926f43a1f"
+checksum = "35368b8ccf2a61fdb493242cb5b0420d6c46f0e285d1f5ab14dbd2f94e7e4f6a"
 dependencies = [
  "num-traits",
 ]
 
 [[package]]
 name = "open-hypergraphs-dot"
-version = "0.2.3"
+version = "0.2.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a1e5243a8e432adf2eeb12b0b24c7d40d565bfcbad9f465edd6efa5df4a47e83"
+checksum = "cf800a0036834718dcd70c606745afdaa93e8fb80828806341bbf8454cc76c0f"
 dependencies = [
  "dot-structures",
  "graphviz-rust",
