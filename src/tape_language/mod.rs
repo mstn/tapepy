@@ -3,8 +3,10 @@ use std::fmt;
 
 pub mod circuit;
 pub mod tape;
+pub mod monomial_tape;
 
 pub use circuit::Circuit;
+pub use monomial_tape::{MonomialTape, MonomialTapeEdge, MonomialTapeError};
 pub use tape::{
     inverse_left_distributor, left_distributor, simplify_flat_plus_id, swap_poly, FlatTapeEdge,
     Tape, TapeEdge, Whisker,

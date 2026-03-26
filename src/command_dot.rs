@@ -13,7 +13,7 @@ use open_hypergraphs::lax::OpenHypergraph;
 use open_hypergraphs_dot::{Options, Theme};
 
 use crate::hypergraph_utils::connected_components_with_edges;
-use crate::tape_language::{Monomial, TapeEdge};
+use crate::tape_language::{Monomial, MonomialTapeEdge, TapeEdge};
 use crate::types::TypeExpr;
 
 #[derive(Debug, Clone, PartialEq)]
@@ -227,6 +227,88 @@ pub fn generate_dot_with_tape_clusters<G: Clone + fmt::Display>(
     dot_graph
 }
 
+pub fn to_svg_with_monomial_tape_clusters<G: Clone + fmt::Display>(
+    graph: &OpenHypergraph<Monomial<TypeExpr>, MonomialTapeEdge<TypeExpr, G>>,
+    opts: &Options<Monomial<TypeExpr>, CommandEdge>,
+) -> Result<Vec<u8>, std::io::Error> {
+    let dot_graph = generate_dot_with_monomial_tape_clusters(graph, opts);
+    exec(
+        dot_graph,
+        &mut PrinterContext::default(),
+        vec![CommandArg::Format(Format::Svg)],
+    )
+}
+
+pub fn generate_dot_with_monomial_tape_clusters<G: Clone + fmt::Display>(
+    graph: &OpenHypergraph<Monomial<TypeExpr>, MonomialTapeEdge<TypeExpr, G>>,
+    opts: &Options<Monomial<TypeExpr>, CommandEdge>,
+) -> Graph {
+    let theme = &opts.theme;
+
+    let mut dot_graph = Graph::DiGraph {
+        id: Id::Plain(String::from("G")),
+        strict: false,
+        stmts: Vec::new(),
+    };
+
+    dot_graph.add_stmt(Stmt::Attribute(Attribute(
+        Id::Plain(String::from("rankdir")),
+        Id::Plain(opts.orientation.to_string()),
+    )));
+    dot_graph.add_stmt(Stmt::Attribute(Attribute(
+        Id::Plain(String::from("compound")),
+        Id::Plain(String::from("true")),
+    )));
+
+    dot_graph.add_stmt(Stmt::Attribute(Attribute(
+        Id::Plain(String::from("bgcolor")),
+        Id::Plain(format!("\"{}\"", theme.bgcolor.clone())),
+    )));
+
+    dot_graph.add_stmt(Stmt::Node(Node {
+        id: NodeId(Id::Plain(String::from("node")), None),
+        attributes: vec![
+            Attribute(
+                Id::Plain(String::from("shape")),
+                Id::Plain(String::from("record")),
+            ),
+            Attribute(
+                Id::Plain(String::from("style")),
+                Id::Plain(String::from("rounded")),
+            ),
+            Attribute(
+                Id::Plain(String::from("fontcolor")),
+                Id::Plain(format!("\"{}\"", theme.fontcolor.clone())),
+            ),
+            Attribute(
+                Id::Plain(String::from("color")),
+                Id::Plain(format!("\"{}\"", theme.color.clone())),
+            ),
+        ],
+    }));
+
+    dot_graph.add_stmt(Stmt::Node(Node {
+        id: NodeId(Id::Plain(String::from("edge")), None),
+        attributes: vec![
+            Attribute(
+                Id::Plain(String::from("fontcolor")),
+                Id::Plain(format!("\"{}\"", theme.fontcolor.clone())),
+            ),
+            Attribute(
+                Id::Plain(String::from("color")),
+                Id::Plain(format!("\"{}\"", theme.color.clone())),
+            ),
+            Attribute(
+                Id::Plain(String::from("arrowhead")),
+                Id::Plain(String::from("none")),
+            ),
+        ],
+    }));
+
+    extend_monomial_tape_graph(&mut dot_graph, graph, opts, "".to_string());
+    dot_graph
+}
+
 fn extend_graph<O: Clone>(
     dot_graph: &mut Graph,
     graph: &OpenHypergraph<O, CommandEdge>,
@@ -294,8 +376,28 @@ fn extend_tape_graph<G: Clone + fmt::Display>(
     }
 }
 
-fn generate_tape_node_stmts<G: Clone + fmt::Display>(
-    graph: &OpenHypergraph<Monomial<TypeExpr>, TapeEdge<TypeExpr, G>>,
+fn extend_monomial_tape_graph<G: Clone + fmt::Display>(
+    dot_graph: &mut Graph,
+    graph: &OpenHypergraph<Monomial<TypeExpr>, MonomialTapeEdge<TypeExpr, G>>,
+    opts: &Options<Monomial<TypeExpr>, CommandEdge>,
+    prefix: String,
+) {
+    for stmt in generate_tape_node_stmts(graph, opts, &prefix) {
+        dot_graph.add_stmt(stmt);
+    }
+    for stmt in generate_tape_interface_stmts(graph, &prefix) {
+        dot_graph.add_stmt(stmt);
+    }
+    for stmt in generate_tape_quotient_stmts(graph, &prefix) {
+        dot_graph.add_stmt(stmt);
+    }
+    for stmt in generate_monomial_tape_edge_clusters(graph, opts, &prefix) {
+        dot_graph.add_stmt(stmt);
+    }
+}
+
+fn generate_tape_node_stmts<E>(
+    graph: &OpenHypergraph<Monomial<TypeExpr>, E>,
     opts: &Options<Monomial<TypeExpr>, CommandEdge>,
     prefix: &str,
 ) -> Vec<Stmt> {
@@ -799,6 +901,157 @@ fn generate_tape_edge_clusters<G: Clone + fmt::Display>(
 
                 cluster.add_stmt(Stmt::Subgraph(left_cluster));
                 cluster.add_stmt(Stmt::Subgraph(right_cluster));
+                stmts.push(Stmt::Subgraph(cluster));
+            }
+        }
+    }
+
+    stmts
+}
+
+fn generate_monomial_tape_edge_clusters<G: Clone + fmt::Display>(
+    graph: &OpenHypergraph<Monomial<TypeExpr>, MonomialTapeEdge<TypeExpr, G>>,
+    opts: &Options<Monomial<TypeExpr>, CommandEdge>,
+    prefix: &str,
+) -> Vec<Stmt> {
+    let mut stmts = Vec::new();
+    let theme = &opts.theme;
+
+    for (edge_idx, edge_label) in graph.hypergraph.edges.iter().enumerate() {
+        match edge_label {
+            MonomialTapeEdge::Multiset(branches) => {
+                let cluster_id = format!("cluster_{}e_{}", prefix, edge_idx);
+                let mut cluster = Subgraph {
+                    id: Id::Plain(cluster_id),
+                    stmts: vec![
+                        Stmt::Attribute(Attribute(
+                            Id::Plain(String::from("label")),
+                            Id::Plain(String::from("\"\"")),
+                        )),
+                        Stmt::Attribute(Attribute(
+                            Id::Plain(String::from("color")),
+                            Id::Plain(format!("\"{}\"", theme.color.clone())),
+                        )),
+                        Stmt::Attribute(Attribute(
+                            Id::Plain(String::from("fontcolor")),
+                            Id::Plain(format!("\"{}\"", theme.fontcolor.clone())),
+                        )),
+                        Stmt::Attribute(Attribute(
+                            Id::Plain(String::from("style")),
+                            Id::Plain(String::from("rounded")),
+                        )),
+                    ],
+                };
+
+                let parent_edge = &graph.hypergraph.adjacency[edge_idx];
+                let parent_sources_len = parent_edge.sources.len();
+                let parent_targets_len = parent_edge.targets.len();
+                let mut anchors = Vec::new();
+
+                for (branch_idx, branch) in branches.iter().enumerate() {
+                    let child = ensure_interface_lengths_generic(
+                        branch.clone(),
+                        parent_sources_len,
+                        parent_targets_len,
+                    );
+                    let child_prefix = format!("{}e_{}_b{}_c0_", prefix, edge_idx, branch_idx);
+
+                    for (j, &child_source) in child.sources.iter().enumerate() {
+                        let parent_node = parent_edge.sources[j];
+                        let edge = Edge {
+                            ty: EdgeTy::Pair(
+                                Vertex::N(NodeId(
+                                    Id::Plain(format!("{}n_{}", prefix, parent_node.0)),
+                                    None,
+                                )),
+                                Vertex::N(NodeId(
+                                    Id::Plain(format!("{}n_{}", child_prefix, child_source.0)),
+                                    None,
+                                )),
+                            ),
+                            attributes: vec![Attribute(
+                                Id::Plain(String::from("style")),
+                                Id::Plain(String::from("dotted")),
+                            )],
+                        };
+                        stmts.push(Stmt::Edge(edge));
+                    }
+
+                    for (j, &child_target) in child.targets.iter().enumerate() {
+                        let parent_node = parent_edge.targets[j];
+                        let edge = Edge {
+                            ty: EdgeTy::Pair(
+                                Vertex::N(NodeId(
+                                    Id::Plain(format!("{}n_{}", child_prefix, child_target.0)),
+                                    None,
+                                )),
+                                Vertex::N(NodeId(
+                                    Id::Plain(format!("{}n_{}", prefix, parent_node.0)),
+                                    None,
+                                )),
+                            ),
+                            attributes: vec![Attribute(
+                                Id::Plain(String::from("style")),
+                                Id::Plain(String::from("dotted")),
+                            )],
+                        };
+                        stmts.push(Stmt::Edge(edge));
+                    }
+
+                    let mut branch_cluster = Subgraph {
+                        id: Id::Plain(format!("cluster_{}", child_prefix)),
+                        stmts: vec![
+                            Stmt::Attribute(Attribute(
+                                Id::Plain(String::from("label")),
+                                Id::Plain(String::from("\"\"")),
+                            )),
+                            Stmt::Attribute(Attribute(
+                                Id::Plain(String::from("style")),
+                                Id::Plain(String::from("dashed")),
+                            )),
+                        ],
+                    };
+
+                    for stmt in generate_tape_node_stmts(&child, opts, &child_prefix) {
+                        branch_cluster.add_stmt(stmt);
+                    }
+                    for stmt in generate_tape_interface_stmts(&child, &child_prefix) {
+                        branch_cluster.add_stmt(stmt);
+                    }
+                    for stmt in generate_tape_quotient_stmts(&child, &child_prefix) {
+                        branch_cluster.add_stmt(stmt);
+                    }
+                    for stmt in generate_tape_edge_clusters(&child, opts, &child_prefix) {
+                        branch_cluster.add_stmt(stmt);
+                    }
+
+                    if !child.hypergraph.nodes.is_empty() {
+                        anchors.push(format!("{}n_{}", child_prefix, 0));
+                    }
+
+                    cluster.add_stmt(Stmt::Subgraph(branch_cluster));
+                }
+
+                for window in anchors.windows(2) {
+                    let edge = Edge {
+                        ty: EdgeTy::Pair(
+                            Vertex::N(NodeId(Id::Plain(window[0].clone()), None)),
+                            Vertex::N(NodeId(Id::Plain(window[1].clone()), None)),
+                        ),
+                        attributes: vec![
+                            Attribute(
+                                Id::Plain(String::from("style")),
+                                Id::Plain(String::from("invis")),
+                            ),
+                            Attribute(
+                                Id::Plain(String::from("constraint")),
+                                Id::Plain(String::from("true")),
+                            ),
+                        ],
+                    };
+                    cluster.add_stmt(Stmt::Edge(edge));
+                }
+
                 stmts.push(Stmt::Subgraph(cluster));
             }
         }
@@ -1444,11 +1697,11 @@ fn escape_dot_label(s: &str) -> String {
         .collect()
 }
 
-fn ensure_interface_lengths<O>(
-    graph: OpenHypergraph<O, CommandEdge>,
+fn ensure_interface_lengths_generic<O, E>(
+    graph: OpenHypergraph<O, E>,
     parent_sources_len: usize,
     parent_targets_len: usize,
-) -> OpenHypergraph<O, CommandEdge> {
+) -> OpenHypergraph<O, E> {
     if graph.sources.len() != parent_sources_len || graph.targets.len() != parent_targets_len {
         panic!(
             "subgraph interface mismatch: expected {} -> {}, got {} -> {}",
@@ -1460,4 +1713,12 @@ fn ensure_interface_lengths<O>(
     }
 
     graph
+}
+
+fn ensure_interface_lengths<O>(
+    graph: OpenHypergraph<O, CommandEdge>,
+    parent_sources_len: usize,
+    parent_targets_len: usize,
+) -> OpenHypergraph<O, CommandEdge> {
+    ensure_interface_lengths_generic(graph, parent_sources_len, parent_targets_len)
 }

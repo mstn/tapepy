@@ -16,7 +16,10 @@ use std::error::Error;
 use std::path::PathBuf;
 
 use clap::{Parser, ValueEnum};
-use command_dot::{generate_dot_with_clusters, to_svg_with_clusters, CommandEdge};
+use command_dot::{
+    generate_dot_with_clusters, generate_dot_with_monomial_tape_clusters,
+    to_svg_with_clusters, to_svg_with_monomial_tape_clusters, CommandEdge,
+};
 use command_tape::tape_from_command;
 use command_typing::{collect_constraints, infer_command_from_suite};
 use graphviz_rust::printer::{DotPrinter, PrinterContext};
@@ -24,6 +27,8 @@ use open_hypergraphs::lax::OpenHypergraph;
 use open_hypergraphs_dot::Options;
 use program_tape::{apply_substitution_to_monomial, solve_program_tape_with_subst};
 use rustpython_parser::{ast, Parse};
+use std::ffi::OsString;
+use tape_language::MonomialTape;
 
 #[derive(Parser)]
 #[command(author, version, about = "Tapepy CLI")]
@@ -93,6 +98,8 @@ fn compile_file(
 
     let tree = infer_command_from_suite(&suite);
     let tape = tape_from_command(&tree);
+    let monomial_tape = MonomialTape::try_from_tape(tape.clone())
+        .map_err(|err| format!("monomial tape conversion failed: {:?}", err))?;
     let mut next_id = 0usize;
     let term = tape.to_hypergraph(&mut || {
         let id = next_id;
@@ -123,6 +130,13 @@ fn compile_file(
         (solved, tape_language::simplify_flat_plus_id(flat_solved))
     };
 
+    let mut mono_next_id = 0usize;
+    let monomial_graph = monomial_tape.to_hypergraph(&mut || {
+        let id = mono_next_id;
+        mono_next_id += 1;
+        types::TypeExpr::Var(types::TypeVar(id))
+    });
+
     let opts = Options {
         node_label: Box::new(|mono: &tape_language::Monomial<types::TypeExpr>| mono.to_string()),
         edge_label: Box::new(|e: &CommandEdge| e.to_string()),
@@ -130,8 +144,14 @@ fn compile_file(
     };
 
     match format {
-        OutputFormat::Dot => write_flat_dot(&flat_graph, &opts, output),
-        OutputFormat::Svg => write_flat_svg(&flat_graph, &opts, output),
+        OutputFormat::Dot => {
+            write_flat_dot(&flat_graph, &opts, output)?;
+            write_monomial_dot(&monomial_graph, &opts, &monomial_output_path(output))
+        }
+        OutputFormat::Svg => {
+            write_flat_svg(&flat_graph, &opts, output)?;
+            write_monomial_svg(&monomial_graph, &opts, &monomial_output_path(output))
+        }
     }
 }
 
@@ -167,4 +187,49 @@ fn write_flat_svg<E: Clone + std::fmt::Display>(
     let svg = to_svg_with_clusters(&flat_graph, opts)?;
     std::fs::write(output, svg)?;
     Ok(())
+}
+
+fn write_monomial_dot<E: Clone + std::fmt::Display>(
+    graph: &OpenHypergraph<
+        tape_language::Monomial<types::TypeExpr>,
+        tape_language::MonomialTapeEdge<types::TypeExpr, E>,
+    >,
+    opts: &Options<tape_language::Monomial<types::TypeExpr>, CommandEdge>,
+    output: &PathBuf,
+) -> Result<(), Box<dyn Error>> {
+    let dot_graph = generate_dot_with_monomial_tape_clusters(graph, opts);
+    let mut ctx = PrinterContext::default();
+    let dot_string = dot_graph.print(&mut ctx);
+    std::fs::write(output, dot_string)?;
+    Ok(())
+}
+
+fn write_monomial_svg<E: Clone + std::fmt::Display>(
+    graph: &OpenHypergraph<
+        tape_language::Monomial<types::TypeExpr>,
+        tape_language::MonomialTapeEdge<types::TypeExpr, E>,
+    >,
+    opts: &Options<tape_language::Monomial<types::TypeExpr>, CommandEdge>,
+    output: &PathBuf,
+) -> Result<(), Box<dyn Error>> {
+    let svg = to_svg_with_monomial_tape_clusters(graph, opts)?;
+    std::fs::write(output, svg)?;
+    Ok(())
+}
+
+fn monomial_output_path(output: &PathBuf) -> PathBuf {
+    let stem = output
+        .file_stem()
+        .unwrap_or_default()
+        .to_string_lossy()
+        .to_string();
+    let ext = output.extension().map(|e| e.to_string_lossy().to_string());
+    let new_name = if let Some(ext) = ext {
+        format!("{}.monomial.{}", stem, ext)
+    } else {
+        format!("{}.monomial", stem)
+    };
+    let mut new_path = output.clone();
+    new_path.set_file_name(OsString::from(new_name));
+    new_path
 }
