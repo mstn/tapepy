@@ -8,6 +8,7 @@ mod context;
 mod expression_circuit;
 mod frontends;
 mod infra;
+mod matching;
 mod predicate_tape;
 mod program_tape;
 mod python_builtin_signatures;
