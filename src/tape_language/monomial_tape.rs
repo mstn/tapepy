@@ -347,13 +347,16 @@ fn copy_graph<S: Clone, G>(
     let labels = atomic_nodes(mono, tensor_kind);
     let mut graph = OpenHypergraph::empty();
     let mut sources = Vec::with_capacity(labels.len());
-    let mut targets = Vec::with_capacity(labels.len() * 2);
+    let mut left_targets = Vec::with_capacity(labels.len());
+    let mut right_targets = Vec::with_capacity(labels.len());
     for label in labels {
         let node = graph.new_node(label);
         sources.push(node);
-        targets.push(node);
-        targets.push(node);
+        left_targets.push(node);
+        right_targets.push(node);
     }
+    let mut targets = left_targets;
+    targets.extend(right_targets);
     graph.sources = sources;
     graph.targets = targets;
     graph
@@ -365,14 +368,17 @@ fn join_graph<S: Clone, G>(
 ) -> OpenHypergraph<MonomialHyperNode<S>, MonomialTapeEdge<S, G>> {
     let labels = atomic_nodes(mono, tensor_kind);
     let mut graph = OpenHypergraph::empty();
-    let mut sources = Vec::with_capacity(labels.len() * 2);
+    let mut left_sources = Vec::with_capacity(labels.len());
+    let mut right_sources = Vec::with_capacity(labels.len());
     let mut targets = Vec::with_capacity(labels.len());
     for label in labels {
         let node = graph.new_node(label);
-        sources.push(node);
-        sources.push(node);
+        left_sources.push(node);
+        right_sources.push(node);
         targets.push(node);
     }
+    let mut sources = left_sources;
+    sources.extend(right_sources);
     graph.sources = sources;
     graph.targets = targets;
     graph
