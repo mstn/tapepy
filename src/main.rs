@@ -12,6 +12,7 @@ mod matching;
 mod predicate_tape;
 mod program_tape;
 mod python_builtin_signatures;
+mod rewriting;
 mod solver;
 mod tape_language;
 mod types;

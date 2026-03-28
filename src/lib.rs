@@ -11,6 +11,7 @@ pub mod matching;
 pub mod predicate_tape;
 pub mod program_tape;
 pub mod python_builtin_signatures;
+pub mod rewriting;
 pub mod solver;
 pub mod tape_language;
 pub mod types;
