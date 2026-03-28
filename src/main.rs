@@ -26,6 +26,7 @@ use graphviz_rust::printer::{DotPrinter, PrinterContext};
 use open_hypergraphs::lax::OpenHypergraph;
 use open_hypergraphs_dot::Options;
 use program_tape::{apply_substitution_to_monomial, solve_program_tape_with_subst};
+use solver::TypeSubstitution;
 use rustpython_parser::{ast, Parse};
 use std::ffi::OsString;
 use tape_language::MonomialTape;
@@ -113,8 +114,8 @@ fn compile_file(
         types::TypeExpr::Var(types::TypeVar(id))
     });
 
-    let (_graph, flat_graph) = if raw_tape {
-        (term, tape_language::simplify_flat_plus_id(flat_term))
+    let (subst, flat_graph) = if raw_tape {
+        (None, tape_language::simplify_flat_plus_id(flat_term))
     } else {
         let constraints = collect_constraints(&tree);
         let (solved, subst) = solve_program_tape_with_subst(&term, constraints.constraints());
@@ -127,7 +128,8 @@ fn compile_file(
                 tape_language::FlatTapeEdge::Plus => tape_language::FlatTapeEdge::Plus,
             });
         let flat_solved = OpenHypergraph::from_strict(flat_solved.to_strict());
-        (solved, tape_language::simplify_flat_plus_id(flat_solved))
+        let _ = solved;
+        (Some(subst), tape_language::simplify_flat_plus_id(flat_solved))
     };
 
     let mut mono_next_id = 0usize;
@@ -136,9 +138,24 @@ fn compile_file(
         mono_next_id += 1;
         types::TypeExpr::Var(types::TypeVar(id))
     });
+    let monomial_graph = if let Some(subst) = &subst {
+        let monomial_graph = monomial_graph
+            .map_nodes(|node| apply_substitution_to_monomial_node(&node, subst))
+            .map_edges(|edge| apply_substitution_to_monomial_edge(&edge, subst));
+        OpenHypergraph::from_strict(monomial_graph.to_strict())
+    } else {
+        monomial_graph
+    };
 
     let opts = Options {
         node_label: Box::new(|mono: &tape_language::Monomial<types::TypeExpr>| mono.to_string()),
+        edge_label: Box::new(|e: &CommandEdge| e.to_string()),
+        ..Options::default()
+    };
+    let monomial_opts = Options {
+        node_label: Box::new(|node: &tape_language::MonomialHyperNode<types::TypeExpr>| {
+            node.context.to_string()
+        }),
         edge_label: Box::new(|e: &CommandEdge| e.to_string()),
         ..Options::default()
     };
@@ -146,11 +163,19 @@ fn compile_file(
     match format {
         OutputFormat::Dot => {
             write_flat_dot(&flat_graph, &opts, output)?;
-            write_monomial_dot(&monomial_graph, &opts, &monomial_output_path(output))
+            write_monomial_dot(
+                &monomial_graph,
+                &monomial_opts,
+                &monomial_output_path(output),
+            )
         }
         OutputFormat::Svg => {
             write_flat_svg(&flat_graph, &opts, output)?;
-            write_monomial_svg(&monomial_graph, &opts, &monomial_output_path(output))
+            write_monomial_svg(
+                &monomial_graph,
+                &monomial_opts,
+                &monomial_output_path(output),
+            )
         }
     }
 }
@@ -191,10 +216,10 @@ fn write_flat_svg<E: Clone + std::fmt::Display>(
 
 fn write_monomial_dot<E: Clone + std::fmt::Display>(
     graph: &OpenHypergraph<
-        tape_language::Monomial<types::TypeExpr>,
+        tape_language::MonomialHyperNode<types::TypeExpr>,
         tape_language::MonomialTapeEdge<types::TypeExpr, E>,
     >,
-    opts: &Options<tape_language::Monomial<types::TypeExpr>, CommandEdge>,
+    opts: &Options<tape_language::MonomialHyperNode<types::TypeExpr>, CommandEdge>,
     output: &PathBuf,
 ) -> Result<(), Box<dyn Error>> {
     let dot_graph = generate_dot_with_monomial_tape_clusters(graph, opts);
@@ -206,10 +231,10 @@ fn write_monomial_dot<E: Clone + std::fmt::Display>(
 
 fn write_monomial_svg<E: Clone + std::fmt::Display>(
     graph: &OpenHypergraph<
-        tape_language::Monomial<types::TypeExpr>,
+        tape_language::MonomialHyperNode<types::TypeExpr>,
         tape_language::MonomialTapeEdge<types::TypeExpr, E>,
     >,
-    opts: &Options<tape_language::Monomial<types::TypeExpr>, CommandEdge>,
+    opts: &Options<tape_language::MonomialHyperNode<types::TypeExpr>, CommandEdge>,
     output: &PathBuf,
 ) -> Result<(), Box<dyn Error>> {
     let svg = to_svg_with_monomial_tape_clusters(graph, opts)?;
@@ -232,4 +257,44 @@ fn monomial_output_path(output: &PathBuf) -> PathBuf {
     let mut new_path = output.clone();
     new_path.set_file_name(OsString::from(new_name));
     new_path
+}
+
+fn apply_substitution_to_monomial_node(
+    node: &tape_language::MonomialHyperNode<types::TypeExpr>,
+    subst: &TypeSubstitution,
+) -> tape_language::MonomialHyperNode<types::TypeExpr> {
+    tape_language::MonomialHyperNode::new(
+        node.tensor_kind,
+        apply_substitution_to_monomial(&node.context, subst),
+    )
+}
+
+fn apply_substitution_to_monomial_edge<E: Clone>(
+    edge: &tape_language::MonomialTapeEdge<types::TypeExpr, E>,
+    subst: &TypeSubstitution,
+) -> tape_language::MonomialTapeEdge<types::TypeExpr, E> {
+    match edge {
+        tape_language::MonomialTapeEdge::Generator(generator) => {
+            tape_language::MonomialTapeEdge::Generator(generator.clone())
+        }
+        tape_language::MonomialTapeEdge::CircuitCopy => tape_language::MonomialTapeEdge::CircuitCopy,
+        tape_language::MonomialTapeEdge::CircuitDiscard => {
+            tape_language::MonomialTapeEdge::CircuitDiscard
+        }
+        tape_language::MonomialTapeEdge::CircuitJoin => tape_language::MonomialTapeEdge::CircuitJoin,
+        tape_language::MonomialTapeEdge::TapeDiscard => tape_language::MonomialTapeEdge::TapeDiscard,
+        tape_language::MonomialTapeEdge::TapeSplit => tape_language::MonomialTapeEdge::TapeSplit,
+        tape_language::MonomialTapeEdge::TapeCreate => tape_language::MonomialTapeEdge::TapeCreate,
+        tape_language::MonomialTapeEdge::TapeMerge => tape_language::MonomialTapeEdge::TapeMerge,
+        tape_language::MonomialTapeEdge::FromAddToMul(mono) => {
+            tape_language::MonomialTapeEdge::FromAddToMul(apply_substitution_to_monomial(
+                mono, subst,
+            ))
+        }
+        tape_language::MonomialTapeEdge::FromMulToAdd(mono) => {
+            tape_language::MonomialTapeEdge::FromMulToAdd(apply_substitution_to_monomial(
+                mono, subst,
+            ))
+        }
+    }
 }
