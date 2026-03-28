@@ -16,7 +16,7 @@ use crate::types;
 pub trait CompilerFrontend {
     type Error;
 
-    fn compile(&self, source_name: &str, source: &str) -> Result<CommandDerivationTree, Self::Error>;
+    fn parse(&self, source_name: &str, source: &str) -> Result<CommandDerivationTree, Self::Error>;
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -38,7 +38,7 @@ pub enum CompileError<E> {
 impl<E: fmt::Display> fmt::Display for CompileError<E> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            CompileError::Frontend(err) => write!(f, "frontend compile failed: {}", err),
+            CompileError::Frontend(err) => write!(f, "frontend parse failed: {}", err),
             CompileError::Backend(err) => write!(f, "compile failed: {}", err),
         }
     }
@@ -56,7 +56,7 @@ where
     F::Error: Error + 'static,
 {
     let tree = frontend
-        .compile(source_name, source)
+        .parse(source_name, source)
         .map_err(CompileError::Frontend)?;
     compile_program(&tree, options).map_err(CompileError::Backend)
 }

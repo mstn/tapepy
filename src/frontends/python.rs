@@ -8,7 +8,7 @@ pub struct PythonCompiler;
 impl CompilerFrontend for PythonCompiler {
     type Error = ParseError;
 
-    fn compile(&self, source_name: &str, source: &str) -> Result<CommandDerivationTree, Self::Error> {
+    fn parse(&self, source_name: &str, source: &str) -> Result<CommandDerivationTree, Self::Error> {
         let suite = ast::Suite::parse(source, source_name)?;
         Ok(infer_command_from_suite(&suite))
     }
