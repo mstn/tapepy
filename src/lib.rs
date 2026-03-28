@@ -1,8 +1,12 @@
+pub mod app;
+pub mod compiler;
 pub mod command_dot;
 pub mod command_tape;
 pub mod command_typing;
 pub mod context;
 pub mod expression_circuit;
+pub mod frontends;
+pub mod infra;
 pub mod predicate_tape;
 pub mod program_tape;
 pub mod python_builtin_signatures;
