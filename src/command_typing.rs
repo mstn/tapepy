@@ -19,10 +19,6 @@ impl CommandJudgment {
     pub fn context(&self) -> &ContextSnapshot {
         &self.context
     }
-
-    pub fn command(&self) -> &str {
-        &self.command
-    }
 }
 
 #[derive(Debug, Clone)]

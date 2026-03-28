@@ -1,4 +1,4 @@
-use open_hypergraphs::lax::{Monoidal, OpenHypergraph};
+use open_hypergraphs::lax::OpenHypergraph;
 use std::fmt;
 
 pub mod circuit;
@@ -7,12 +7,9 @@ pub mod monomial_tape;
 
 pub use circuit::Circuit;
 pub use monomial_tape::{
-    MonomialHyperNode, MonomialTape, MonomialTapeEdge, MonomialTapeError, TensorKind,
+    MonomialHyperNode, MonomialTape, MonomialTapeEdge,
 };
-pub use tape::{
-    inverse_left_distributor, left_distributor, simplify_flat_plus_id, swap_poly, FlatTapeEdge,
-    Tape, TapeEdge, Whisker,
-};
+pub use tape::{Tape, TapeEdge};
 
 pub trait GeneratorShape {
     fn arity(&self) -> usize;
@@ -165,18 +162,6 @@ impl<S: Clone> Polynomial<S> {
 
     pub fn monomial(term: Monomial<S>) -> Self {
         Polynomial::Monomial(term)
-    }
-
-    pub fn from_monomial_sorts<I, J>(monomials: I) -> Self
-    where
-        I: IntoIterator<Item = J>,
-        J: IntoIterator<Item = S>,
-    {
-        monomials
-            .into_iter()
-            .map(Monomial::from_sorts)
-            .map(Polynomial::monomial)
-            .fold(Polynomial::zero(), Polynomial::sum)
     }
 
     pub fn from_monomials<I>(monomials: I) -> Self

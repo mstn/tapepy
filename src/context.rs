@@ -28,10 +28,6 @@ impl Context {
         self.vars.insert(name.to_string(), ty);
     }
 
-    pub fn snapshot(&self) -> BTreeMap<String, TypeExpr> {
-        self.vars.clone()
-    }
-
     pub fn entries(&self) -> Vec<(String, TypeExpr)> {
         self.vars
             .iter()

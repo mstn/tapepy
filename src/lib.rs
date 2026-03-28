@@ -3,7 +3,6 @@ pub mod command_tape;
 pub mod command_typing;
 pub mod context;
 pub mod expression_circuit;
-pub mod hypergraph_utils;
 pub mod predicate_tape;
 pub mod program_tape;
 pub mod python_builtin_signatures;

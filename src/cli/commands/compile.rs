@@ -9,7 +9,7 @@ use rustpython_parser::{ast, Parse};
 use crate::cli::args::CompileArgs;
 use crate::cli::home::HomeFolderLayout;
 use crate::cli::output::{yaml_string, OutputFormat};
-use crate::command_dot::{generate_dot_with_clusters, CommandEdge};
+use crate::command_dot::{generate_dot_with_monomial_tape_clusters, CommandEdge};
 use crate::command_tape::tape_from_command;
 use crate::command_typing::{collect_constraints, infer_command_from_suite};
 use crate::program_tape::{apply_substitution_to_monomial, solve_program_tape_with_subst};
@@ -49,28 +49,13 @@ pub fn run(home: &HomeFolderLayout, args: &CompileArgs) -> Result<(), Box<dyn Er
         next_id += 1;
         types::TypeExpr::Var(types::TypeVar(id))
     });
-    let mut flat_next_id = 0usize;
-    let flat_term = tape.to_flat_hypergraph(&mut || {
-        let id = flat_next_id;
-        flat_next_id += 1;
-        types::TypeExpr::Var(types::TypeVar(id))
-    });
 
-    let (subst, flat_graph) = if args.raw_tape {
-        (None, tape_language::simplify_flat_plus_id(flat_term))
+    let subst = if args.raw_tape {
+        None
     } else {
         let constraints = collect_constraints(&tree);
         let (_solved, subst) = solve_program_tape_with_subst(&term, constraints.constraints());
-        let flat_solved = flat_term
-            .map_nodes(|mono| apply_substitution_to_monomial(&mono, &subst))
-            .map_edges(|edge| match edge {
-                tape_language::FlatTapeEdge::Atom(generator) => {
-                    tape_language::FlatTapeEdge::Atom(generator.clone())
-                }
-                tape_language::FlatTapeEdge::Plus => tape_language::FlatTapeEdge::Plus,
-            });
-        let flat_solved = OpenHypergraph::from_strict(flat_solved.to_strict());
-        (Some(subst), tape_language::simplify_flat_plus_id(flat_solved))
+        Some(subst)
     };
 
     let mut mono_next_id = 0usize;
@@ -79,7 +64,7 @@ pub fn run(home: &HomeFolderLayout, args: &CompileArgs) -> Result<(), Box<dyn Er
         mono_next_id += 1;
         types::TypeExpr::Var(types::TypeVar(id))
     });
-    let _monomial_graph = if let Some(subst) = &subst {
+    let monomial_graph = if let Some(subst) = &subst {
         let monomial_graph = monomial_graph
             .map_nodes(|node| apply_substitution_to_monomial_node(&node, subst))
             .map_edges(|edge| apply_substitution_to_monomial_edge(&edge, subst));
@@ -89,12 +74,14 @@ pub fn run(home: &HomeFolderLayout, args: &CompileArgs) -> Result<(), Box<dyn Er
     };
 
     let opts = Options {
-        node_label: Box::new(|mono: &tape_language::Monomial<types::TypeExpr>| mono.to_string()),
+        node_label: Box::new(|node: &tape_language::MonomialHyperNode<types::TypeExpr>| {
+            node.context.to_string()
+        }),
         edge_label: Box::new(|edge: &CommandEdge| edge.to_string()),
         ..Options::default()
     };
 
-    write_flat_dot(&flat_graph, &opts, &home.ir_path(&run_id))?;
+    write_monomial_dot(&monomial_graph, &opts, &home.ir_path(&run_id))?;
     println!("{}", home.run_dir(&run_id).display());
     Ok(())
 }
@@ -127,18 +114,15 @@ fn compile_options_yaml(options: &CompileRunOptions<'_>) -> String {
     )
 }
 
-fn write_flat_dot<E: Clone + std::fmt::Display>(
+fn write_monomial_dot<E: Clone + std::fmt::Display>(
     graph: &OpenHypergraph<
-        tape_language::Monomial<types::TypeExpr>,
-        tape_language::FlatTapeEdge<E>,
+        tape_language::MonomialHyperNode<types::TypeExpr>,
+        tape_language::MonomialTapeEdge<types::TypeExpr, E>,
     >,
-    opts: &Options<tape_language::Monomial<types::TypeExpr>, CommandEdge>,
+    opts: &Options<tape_language::MonomialHyperNode<types::TypeExpr>, CommandEdge>,
     output: &Path,
 ) -> Result<(), Box<dyn Error>> {
-    let flat_graph = graph
-        .clone()
-        .map_edges(|edge| CommandEdge::Atom(edge.to_string()));
-    let dot_graph = generate_dot_with_clusters(&flat_graph, opts);
+    let dot_graph = generate_dot_with_monomial_tape_clusters(graph, opts);
     let mut ctx = PrinterContext::default();
     let dot_string = dot_graph.print(&mut ctx);
     std::fs::write(output, dot_string)?;
@@ -163,15 +147,6 @@ fn apply_substitution_to_monomial_edge<E: Clone>(
         tape_language::MonomialTapeEdge::Generator(generator) => {
             tape_language::MonomialTapeEdge::Generator(generator.clone())
         }
-        tape_language::MonomialTapeEdge::CircuitCopy => tape_language::MonomialTapeEdge::CircuitCopy,
-        tape_language::MonomialTapeEdge::CircuitDiscard => {
-            tape_language::MonomialTapeEdge::CircuitDiscard
-        }
-        tape_language::MonomialTapeEdge::CircuitJoin => tape_language::MonomialTapeEdge::CircuitJoin,
-        tape_language::MonomialTapeEdge::TapeDiscard => tape_language::MonomialTapeEdge::TapeDiscard,
-        tape_language::MonomialTapeEdge::TapeSplit => tape_language::MonomialTapeEdge::TapeSplit,
-        tape_language::MonomialTapeEdge::TapeCreate => tape_language::MonomialTapeEdge::TapeCreate,
-        tape_language::MonomialTapeEdge::TapeMerge => tape_language::MonomialTapeEdge::TapeMerge,
         tape_language::MonomialTapeEdge::FromAddToMul(mono) => {
             tape_language::MonomialTapeEdge::FromAddToMul(apply_substitution_to_monomial(
                 mono, subst,

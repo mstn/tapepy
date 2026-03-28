@@ -1,4 +1,4 @@
-use open_hypergraphs::lax::{Arrow as _, Monoidal, OpenHypergraph};
+use open_hypergraphs::lax::OpenHypergraph;
 use std::fmt;
 
 use super::{compose_lax_unchecked, GeneratorShape, GeneratorTypes};

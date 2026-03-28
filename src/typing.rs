@@ -46,12 +46,6 @@ pub struct ConstraintStore {
 }
 
 impl ConstraintStore {
-    pub fn new() -> Self {
-        Self {
-            constraints: Vec::new(),
-        }
-    }
-
     pub fn constraints(&self) -> &[TypeConstraint] {
         &self.constraints
     }
@@ -121,10 +115,6 @@ impl DeductionTree {
         &self.children
     }
 
-    pub fn rule(&self) -> &'static str {
-        self.rule
-    }
-
     pub fn form(&self) -> &ExprForm {
         &self.form
     }
@@ -180,11 +170,6 @@ impl DeductionTree {
     }
 }
 
-pub fn infer_expression_in_context(expr: &Expr, context: &Context) -> DeductionTree {
-    let mut state = InferenceState::new(context.entries().len());
-    infer_expression_in_context_with_state(expr, context, &mut state)
-}
-
 pub fn infer_expression_in_context_with_state(
     expr: &Expr,
     context: &Context,
@@ -193,31 +178,12 @@ pub fn infer_expression_in_context_with_state(
     infer_expr(expr, context, state)
 }
 
-pub fn infer_expression(expr: &Expr) -> DeductionTree {
-    let mut context = Context::default();
-    collect_free_vars(expr, &mut context);
-    let mut state = InferenceState::new(context.entries().len());
-    infer_expr(expr, &context, &mut state)
-}
-
-pub fn infer_predicate_in_context(expr: &Expr, context: &Context) -> DeductionTree {
-    let mut state = InferenceState::new(context.entries().len());
-    infer_predicate_in_context_with_state(expr, context, &mut state)
-}
-
 pub fn infer_predicate_in_context_with_state(
     expr: &Expr,
     context: &Context,
     state: &mut InferenceState,
 ) -> DeductionTree {
     infer_predicate_expr(expr, context, state)
-}
-
-pub fn infer_predicate(expr: &Expr) -> DeductionTree {
-    let mut context = Context::default();
-    collect_free_vars(expr, &mut context);
-    let mut state = InferenceState::new(context.entries().len());
-    infer_predicate_expr(expr, &context, &mut state)
 }
 
 fn infer_expr(expr: &Expr, context: &Context, state: &mut InferenceState) -> DeductionTree {
@@ -538,40 +504,6 @@ fn infer_call(
         ExprForm::Call(name),
         constraints,
     )
-}
-
-fn collect_free_vars(expr: &Expr, context: &mut Context) {
-    match expr {
-        Expr::Name(ExprName { id, .. }) => {
-            context.get_or_insert_var(id.as_str());
-        }
-        Expr::Constant(_) => {}
-        Expr::UnaryOp(unary) => collect_free_vars(&unary.operand, context),
-        Expr::BinOp(bin) => {
-            collect_free_vars(&bin.left, context);
-            collect_free_vars(&bin.right, context);
-        }
-        Expr::BoolOp(bool_op) => {
-            for value in &bool_op.values {
-                collect_free_vars(value, context);
-            }
-        }
-        Expr::Compare(compare) => {
-            collect_free_vars(&compare.left, context);
-            for value in &compare.comparators {
-                collect_free_vars(value, context);
-            }
-        }
-        Expr::Call(call) => {
-            if !call.keywords.is_empty() {
-                panic!("keyword arguments are not supported");
-            }
-            for arg in &call.args {
-                collect_free_vars(arg, context);
-            }
-        }
-        _ => {}
-    }
 }
 
 fn make_leaf(

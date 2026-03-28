@@ -5,13 +5,6 @@ use crate::solver::{apply_substitution, solve_type_equations, TypeSubstitution};
 use crate::tape_language::{Monomial, TapeEdge};
 use crate::types::{TypeConstraint, TypeExpr};
 
-pub fn solve_and_strictify_program_tape(
-    term: &OpenHypergraph<Monomial<TypeExpr>, TapeEdge<TypeExpr, ExprGenerator>>,
-    constraints: &[TypeConstraint],
-) -> OpenHypergraph<Monomial<TypeExpr>, TapeEdge<TypeExpr, ExprGenerator>> {
-    solve_program_tape_with_subst(term, constraints).0
-}
-
 pub fn solve_program_tape_with_subst(
     term: &OpenHypergraph<Monomial<TypeExpr>, TapeEdge<TypeExpr, ExprGenerator>>,
     constraints: &[TypeConstraint],

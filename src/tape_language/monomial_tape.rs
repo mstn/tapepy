@@ -7,22 +7,13 @@ use super::{compose_lax_unchecked, GeneratorShape, GeneratorTypes, Monomial, Tap
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum MonomialTapeError {
-    NonMonomialArity { inputs: usize, outputs: usize },
+    InvalidTape,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum TensorKind {
     Additive,
     Multiplicative,
-}
-
-impl TensorKind {
-    pub fn flipped(self) -> Self {
-        match self {
-            TensorKind::Additive => TensorKind::Multiplicative,
-            TensorKind::Multiplicative => TensorKind::Additive,
-        }
-    }
 }
 
 impl fmt::Display for TensorKind {
@@ -58,34 +49,14 @@ impl<S: Clone + fmt::Display> fmt::Display for MonomialHyperNode<S> {
 #[derive(Debug, Clone, PartialEq)]
 pub enum MonomialTapeEdge<S: Clone, G> {
     Generator(G),
-    CircuitCopy,
-    CircuitDiscard,
-    CircuitJoin,
-    TapeDiscard,
-    TapeSplit,
-    TapeCreate,
-    TapeMerge,
     FromAddToMul(Monomial<S>),
     FromMulToAdd(Monomial<S>),
-}
-
-impl<S: Clone, G> MonomialTapeEdge<S, G> {
-    pub fn multiplicity(&self) -> usize {
-        1
-    }
 }
 
 impl<S: fmt::Display + Clone, G: fmt::Display> fmt::Display for MonomialTapeEdge<S, G> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             MonomialTapeEdge::Generator(generator) => write!(f, "{}", generator),
-            MonomialTapeEdge::CircuitCopy => write!(f, "copy"),
-            MonomialTapeEdge::CircuitDiscard => write!(f, "discard"),
-            MonomialTapeEdge::CircuitJoin => write!(f, "join"),
-            MonomialTapeEdge::TapeDiscard => write!(f, "tape-discard"),
-            MonomialTapeEdge::TapeSplit => write!(f, "split"),
-            MonomialTapeEdge::TapeCreate => write!(f, "create"),
-            MonomialTapeEdge::TapeMerge => write!(f, "merge"),
             MonomialTapeEdge::FromAddToMul(mono) => write!(f, "from-add-to-mul({})", mono),
             MonomialTapeEdge::FromMulToAdd(mono) => write!(f, "from-mul-to-add({})", mono),
         }
@@ -97,43 +68,9 @@ pub struct MonomialTape<S: Clone, G> {
     tape: Tape<S, G>,
 }
 
-impl<S: Clone, G> MonomialTape<S, G> {
-    pub fn into_inner(self) -> Tape<S, G> {
-        self.tape
-    }
-
-    pub fn as_tape(&self) -> &Tape<S, G> {
-        &self.tape
-    }
-}
-
 impl<S: Clone + PartialEq, G: GeneratorTypes<S>> MonomialTape<S, G> {
     pub fn try_from_tape(tape: Tape<S, G>) -> Result<Self, MonomialTapeError> {
         Ok(Self { tape })
-    }
-
-    pub fn io_monomials(&self) -> Result<(Monomial<S>, Monomial<S>), MonomialTapeError> {
-        let (inputs, outputs) = self
-            .tape
-            .io_types()
-            .expect("monomial tape requires io types");
-        Ok((inputs[0].clone(), outputs[0].clone()))
-    }
-
-    pub fn seq(left: MonomialTape<S, G>, right: MonomialTape<S, G>) -> MonomialTape<S, G> {
-        let composed = Tape::seq(left.tape, right.tape);
-        MonomialTape::try_from_tape(composed)
-            .unwrap_or_else(|_| panic!("monomial tape seq preserves interface"))
-    }
-
-    pub fn product(left: &MonomialTape<S, G>, right: &MonomialTape<S, G>) -> MonomialTape<S, G>
-    where
-        S: fmt::Debug + fmt::Display,
-        G: Clone + fmt::Display + fmt::Debug,
-    {
-        let product = Tape::product(&left.tape, &right.tape);
-        MonomialTape::try_from_tape(product)
-            .unwrap_or_else(|_| panic!("monomial tape product preserves interface"))
     }
 }
 
