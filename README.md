@@ -19,7 +19,7 @@ Based on [open-hypergraphs](https://github.com/hellas-ai/open-hypergraphs).
 Generate a diagram from the example program:
 
 ```bash
-cargo run -- compile examples/surfacing_parallelism.py --format svg --output /tmp/surfacing_parallelism.svg
+cargo run -- --home-folder .tapepy compile examples/surfacing_parallelism.py
 ```
 
 ## References
