@@ -295,5 +295,15 @@ fn generate_quotient_stmts(
 }
 
 fn escape_dot_label(label: &str) -> String {
-    label.replace('\\', "\\\\").replace('"', "\\\"")
+    let mut out = String::with_capacity(label.len());
+    for ch in label.chars() {
+        match ch {
+            '\\' | '"' | '{' | '}' | '|' | '<' | '>' => {
+                out.push('\\');
+                out.push(ch);
+            }
+            _ => out.push(ch),
+        }
+    }
+    out
 }
