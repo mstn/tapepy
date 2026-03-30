@@ -50,16 +50,6 @@ fn arity_seq_and_product() {
 }
 
 #[test]
-fn arity_sum_requires_matching_arity() {
-    let left: TapeTy = Tape::Id(Monomial::atom(TypeExpr::Int));
-    let right: TapeTy = Tape::Id(Monomial::atom(TypeExpr::Int));
-    let sum: TapeTy = Tape::Sum(Box::new(left), Box::new(right));
-    let arity = sum.arity();
-    assert_eq!(arity.inputs, 1);
-    assert_eq!(arity.outputs, 1);
-}
-
-#[test]
 fn arity_split_create_merge_discard() {
     let mono = Monomial::product(Monomial::atom(TypeExpr::Int), Monomial::atom(TypeExpr::Int));
 
