@@ -13,12 +13,16 @@ use crate::types::TypeExpr;
 #[derive(Debug, Clone, PartialEq)]
 pub enum CommandEdge {
     Atom(String),
+    FromBlackToWhite(String),
+    FromWhiteToBlack(String),
 }
 
 impl fmt::Display for CommandEdge {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            CommandEdge::Atom(label) => write!(f, "{}", label),
+            CommandEdge::Atom(label)
+            | CommandEdge::FromBlackToWhite(label)
+            | CommandEdge::FromWhiteToBlack(label) => write!(f, "{}", label),
         }
     }
 }
@@ -28,9 +32,15 @@ pub fn generate_dot_with_monomial_tape_clusters<G: Clone + fmt::Display>(
     opts: &Options<MonomialHyperNode<TypeExpr>, CommandEdge>,
 ) -> Graph {
     let theme = &opts.theme;
-    let graph = graph
-        .clone()
-        .map_edges(|edge| CommandEdge::Atom(edge.to_string()));
+    let graph = graph.clone().map_edges(|edge| match edge {
+        MonomialTapeEdge::Generator(generator) => CommandEdge::Atom(generator.to_string()),
+        MonomialTapeEdge::FromAddToMul(mono) => {
+            CommandEdge::FromWhiteToBlack(format!("from-add-to-mul({})", mono))
+        }
+        MonomialTapeEdge::FromMulToAdd(mono) => {
+            CommandEdge::FromBlackToWhite(format!("from-mul-to-add({})", mono))
+        }
+    });
 
     let mut dot_graph = Graph::DiGraph {
         id: Id::Plain(String::from("G")),
@@ -154,6 +164,11 @@ fn generate_edge_stmts(
         let raw_label = (opts.edge_label)(&graph.hypergraph.edges[i]);
         let label = escape_dot_label(&raw_label);
 
+        if let Some(node) = conversion_edge_stmt(i, &graph.hypergraph.edges[i]) {
+            stmts.push(Stmt::Node(node));
+            continue;
+        }
+
         let mut source_ports = String::new();
         for j in 0..hyperedge.sources.len() {
             source_ports.push_str(&format!("<s_{j}> | "));
@@ -195,6 +210,52 @@ fn generate_edge_stmts(
         }));
     }
     stmts
+}
+
+fn conversion_edge_stmt(edge_idx: usize, edge: &CommandEdge) -> Option<Node> {
+    let fillcolor = match edge {
+        CommandEdge::FromBlackToWhite(_) => "\"#000000:#ffffff\"",
+        CommandEdge::FromWhiteToBlack(_) => "\"#ffffff:#000000\"",
+        CommandEdge::Atom(_) => return None,
+    };
+
+    Some(Node {
+        id: NodeId(Id::Plain(format!("e_{}", edge_idx)), None),
+        attributes: vec![
+            Attribute(
+                Id::Plain(String::from("shape")),
+                Id::Plain(String::from("diamond")),
+            ),
+            Attribute(
+                Id::Plain(String::from("style")),
+                Id::Plain(String::from("\"filled\"")),
+            ),
+            Attribute(
+                Id::Plain(String::from("fillcolor")),
+                Id::Plain(String::from(fillcolor)),
+            ),
+            Attribute(
+                Id::Plain(String::from("gradientangle")),
+                Id::Plain(String::from("270")),
+            ),
+            Attribute(
+                Id::Plain(String::from("label")),
+                Id::Plain(String::from("\"\"")),
+            ),
+            Attribute(
+                Id::Plain(String::from("width")),
+                Id::Plain(String::from("0.3")),
+            ),
+            Attribute(
+                Id::Plain(String::from("height")),
+                Id::Plain(String::from("0.3")),
+            ),
+            Attribute(
+                Id::Plain(String::from("fixedsize")),
+                Id::Plain(String::from("true")),
+            ),
+        ],
+    })
 }
 
 fn generate_interface_stmts(
@@ -241,25 +302,39 @@ fn generate_connection_stmts(
 ) -> Vec<Stmt> {
     let mut stmts = Vec::new();
     for (i, hyperedge) in graph.hypergraph.adjacency.iter().enumerate() {
+        let simple_conversion = matches!(
+            graph.hypergraph.edges[i],
+            CommandEdge::FromBlackToWhite(_) | CommandEdge::FromWhiteToBlack(_)
+        );
         for (j, &node_id) in hyperedge.sources.iter().enumerate() {
+            let target = if simple_conversion {
+                Vertex::N(NodeId(Id::Plain(format!("e_{}", i)), None))
+            } else {
+                Vertex::N(NodeId(
+                    Id::Plain(format!("e_{}", i)),
+                    Some(Port(None, Some(format!("s_{}", j)))),
+                ))
+            };
             stmts.push(Stmt::Edge(Edge {
                 ty: EdgeTy::Pair(
                     Vertex::N(NodeId(Id::Plain(format!("n_{}", node_id.0)), None)),
-                    Vertex::N(NodeId(
-                        Id::Plain(format!("e_{}", i)),
-                        Some(Port(None, Some(format!("s_{}", j)))),
-                    )),
+                    target,
                 ),
                 attributes: vec![],
             }));
         }
         for (j, &node_id) in hyperedge.targets.iter().enumerate() {
+            let source = if simple_conversion {
+                Vertex::N(NodeId(Id::Plain(format!("e_{}", i)), None))
+            } else {
+                Vertex::N(NodeId(
+                    Id::Plain(format!("e_{}", i)),
+                    Some(Port(None, Some(format!("t_{}", j)))),
+                ))
+            };
             stmts.push(Stmt::Edge(Edge {
                 ty: EdgeTy::Pair(
-                    Vertex::N(NodeId(
-                        Id::Plain(format!("e_{}", i)),
-                        Some(Port(None, Some(format!("t_{}", j)))),
-                    )),
+                    source,
                     Vertex::N(NodeId(Id::Plain(format!("n_{}", node_id.0)), None)),
                 ),
                 attributes: vec![],
