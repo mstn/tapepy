@@ -42,7 +42,17 @@ pub fn compile_run(
         language => return Err(format!("unsupported language `{}`", language).into()),
     };
 
+    std::fs::write(
+        home.ir_before_rewrite_path(&run_id),
+        artifacts.ir_before_rewrite_dot,
+    )?;
     std::fs::write(home.ir_path(&run_id), artifacts.ir_dot)?;
+    std::fs::write(home.rewrite_debug_path(&run_id), artifacts.rewrite_debug)?;
+    let rewrite_steps_dir = home.rewrite_steps_dir(&run_id);
+    std::fs::create_dir_all(&rewrite_steps_dir)?;
+    for (filename, dot) in artifacts.rewrite_step_dots {
+        std::fs::write(rewrite_steps_dir.join(filename), dot)?;
+    }
 
     Ok(CompileRunResult {
         run_dir: home.run_dir(&run_id),

@@ -9,6 +9,7 @@ use crate::command_dot::{generate_dot_with_monomial_tape_clusters, CommandEdge};
 use crate::command_tape::tape_from_command;
 use crate::command_typing::{collect_constraints, CommandDerivationTree};
 use crate::program_tape::{apply_substitution_to_monomial, solve_program_tape_with_subst};
+use crate::rewriting::monomial::rewrite_graph_with_trace;
 use crate::solver::TypeSubstitution;
 use crate::tape_language::{self, MonomialTape};
 use crate::types;
@@ -26,7 +27,10 @@ pub struct CompileOptions {
 
 #[derive(Debug, Clone)]
 pub struct CompileArtifacts {
+    pub ir_before_rewrite_dot: String,
     pub ir_dot: String,
+    pub rewrite_step_dots: Vec<(String, String)>,
+    pub rewrite_debug: String,
 }
 
 #[derive(Debug)]
@@ -98,18 +102,68 @@ fn compile_program(
     } else {
         monomial_graph
     };
+    let ir_before_rewrite_dot = render_monomial_dot(&monomial_graph, &opts_for_monomial());
+    let rewrite_trace = rewrite_monomial_graph(monomial_graph)
+        .map_err(|err| format!("monomial rewrite failed: {:?}", err))?;
+    let opts = opts_for_monomial();
+    let rewrite_step_dots = rewrite_trace
+        .steps
+        .iter()
+        .enumerate()
+        .map(|(idx, step)| {
+            (
+                format!("step_{idx:03}_{}.dot", sanitize_trace_label(&step.phase)),
+                render_monomial_dot(&OpenHypergraph::from_strict(step.graph.clone()), &opts),
+            )
+        })
+        .collect();
 
-    let opts = Options {
+    Ok(CompileArtifacts {
+        ir_before_rewrite_dot,
+        ir_dot: render_monomial_dot(&OpenHypergraph::from_strict(rewrite_trace.normal_form.graph), &opts),
+        rewrite_step_dots,
+        rewrite_debug: rewrite_trace.debug_log,
+    })
+}
+
+fn opts_for_monomial(
+) -> Options<tape_language::MonomialHyperNode<types::TypeExpr>, CommandEdge> {
+    Options {
         node_label: Box::new(|node: &tape_language::MonomialHyperNode<types::TypeExpr>| {
             node.context.to_string()
         }),
         edge_label: Box::new(|edge: &CommandEdge| edge.to_string()),
         ..Options::default()
-    };
+    }
+}
 
-    Ok(CompileArtifacts {
-        ir_dot: render_monomial_dot(&monomial_graph, &opts),
-    })
+fn rewrite_monomial_graph<E>(
+    graph: OpenHypergraph<
+        tape_language::MonomialHyperNode<types::TypeExpr>,
+        tape_language::MonomialTapeEdge<types::TypeExpr, E>,
+    >,
+) -> Result<
+    crate::rewriting::monomial::MonomialRewriteTrace<
+        types::TypeExpr,
+        E,
+    >,
+    crate::rewriting::engine::RewriteError,
+>
+where
+    E: Clone + PartialEq,
+{
+    let strict_graph = graph.to_strict();
+    rewrite_graph_with_trace(strict_graph, 1_000)
+}
+
+fn sanitize_trace_label(label: &str) -> String {
+    label
+        .chars()
+        .map(|ch| match ch {
+            'a'..='z' | 'A'..='Z' | '0'..='9' | '_' | '-' => ch,
+            _ => '_',
+        })
+        .collect()
 }
 
 fn render_monomial_dot<E: Clone + fmt::Display>(

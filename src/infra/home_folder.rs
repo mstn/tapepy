@@ -37,6 +37,18 @@ impl HomeFolderLayout {
         self.run_dir(run_id).join("ir.dot")
     }
 
+    pub fn ir_before_rewrite_path(&self, run_id: &str) -> PathBuf {
+        self.run_dir(run_id).join("ir.before_rewrite.dot")
+    }
+
+    pub fn rewrite_steps_dir(&self, run_id: &str) -> PathBuf {
+        self.run_dir(run_id).join("rewrite_steps")
+    }
+
+    pub fn rewrite_debug_path(&self, run_id: &str) -> PathBuf {
+        self.run_dir(run_id).join("rewrite_debug.txt")
+    }
+
     pub fn create_run(&self) -> Result<String, Box<dyn Error>> {
         self.ensure_root()?;
         let timestamp = Local::now().format("%Y-%m-%dT%H-%M-%S").to_string();

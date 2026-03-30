@@ -46,23 +46,29 @@ enum NextPatternElement {
 #[derive(Debug, Clone)]
 struct SearchState {
     pattern_to_host_node: Vec<Option<NodeId>>,
-    host_node_used: Vec<bool>,
+    host_node_load: Vec<usize>,
     pattern_to_host_edge: Vec<Option<EdgeId>>,
-    host_edge_used: Vec<bool>,
+    host_edge_load: Vec<usize>,
 }
 
 impl SearchState {
     fn new(pattern_node_count: usize, host_node_count: usize, pattern_edge_count: usize, host_edge_count: usize) -> Self {
         Self {
             pattern_to_host_node: vec![None; pattern_node_count],
-            host_node_used: vec![false; host_node_count],
+            host_node_load: vec![0; host_node_count],
             pattern_to_host_edge: vec![None; pattern_edge_count],
-            host_edge_used: vec![false; host_edge_count],
+            host_edge_load: vec![0; host_edge_count],
         }
     }
 }
 
-pub fn enumerate_matches<O: Eq, A: Eq>(
+#[derive(Debug, Clone, Copy)]
+pub struct MatchOptions {
+    pub preserve_host_boundary: bool,
+    pub monic: bool,
+}
+
+pub fn enumerate_matches<O: PartialEq, A: PartialEq>(
     pattern: &open_hypergraphs::strict::vec::OpenHypergraph<O, A>,
     host: &open_hypergraphs::strict::vec::OpenHypergraph<O, A>,
 ) -> Vec<StrictOpenHypergraphMatch>
@@ -70,7 +76,44 @@ where
     O: Clone,
     A: Clone,
 {
-    enumerate_matches_generic(pattern, host)
+    enumerate_matches_generic_with_options(
+        pattern,
+        host,
+        MatchOptions {
+            preserve_host_boundary: true,
+            monic: true,
+        },
+    )
+}
+
+pub fn enumerate_subgraph_matches<O: PartialEq, A: PartialEq>(
+    pattern: &open_hypergraphs::strict::vec::OpenHypergraph<O, A>,
+    host: &open_hypergraphs::strict::vec::OpenHypergraph<O, A>,
+) -> Vec<StrictOpenHypergraphMatch>
+where
+    O: Clone,
+    A: Clone,
+{
+    enumerate_subgraph_matches_with_options(
+        pattern,
+        host,
+        MatchOptions {
+            preserve_host_boundary: false,
+            monic: true,
+        },
+    )
+}
+
+pub fn enumerate_subgraph_matches_with_options<O: PartialEq, A: PartialEq>(
+    pattern: &open_hypergraphs::strict::vec::OpenHypergraph<O, A>,
+    host: &open_hypergraphs::strict::vec::OpenHypergraph<O, A>,
+    options: MatchOptions,
+) -> Vec<StrictOpenHypergraphMatch>
+where
+    O: Clone,
+    A: Clone,
+{
+    enumerate_matches_generic_with_options(pattern, host, options)
 }
 
 pub fn enumerate_matches_generic<K, O, A>(
@@ -85,8 +128,34 @@ where
     K::I: TryFrom<usize> + TryInto<usize>,
     <K::I as TryFrom<usize>>::Error: core::fmt::Debug,
     <K::I as TryInto<usize>>::Error: core::fmt::Debug,
-    O: Eq + Clone,
-    A: Eq + Clone,
+    O: PartialEq + Clone,
+    A: PartialEq + Clone,
+{
+    enumerate_matches_generic_with_options(
+        pattern,
+        host,
+        MatchOptions {
+            preserve_host_boundary: true,
+            monic: true,
+        },
+    )
+}
+
+fn enumerate_matches_generic_with_options<K, O, A>(
+    pattern: &open_hypergraphs::strict::open_hypergraph::OpenHypergraph<K, O, A>,
+    host: &open_hypergraphs::strict::open_hypergraph::OpenHypergraph<K, O, A>,
+    options: MatchOptions,
+) -> Vec<StrictOpenHypergraphMatch>
+where
+    K: ArrayKind,
+    K::Type<K::I>: NaturalArray<K> + AsRef<K::Index>,
+    K::Type<O>: Array<K, O>,
+    K::Type<A>: Array<K, A>,
+    K::I: TryFrom<usize> + TryInto<usize>,
+    <K::I as TryFrom<usize>>::Error: core::fmt::Debug,
+    <K::I as TryInto<usize>>::Error: core::fmt::Debug,
+    O: PartialEq + Clone,
+    A: PartialEq + Clone,
 {
     // We normalize the strict hypergraph into ordinary Rust vectors once up front.
     // The backtracking search then runs on this cached view instead of repeatedly
@@ -94,10 +163,11 @@ where
     let pattern_data = PreparedOpenHypergraph::new(pattern);
     let host_data = PreparedOpenHypergraph::new(host);
 
-    if pattern_data.source_len() > host_data.source_len()
-        || pattern_data.target_len() > host_data.target_len()
-        || pattern_data.node_count() > host_data.node_count()
-        || pattern_data.edge_count() > host_data.edge_count()
+    if ((pattern_data.source_len() > host_data.source_len()
+        || pattern_data.target_len() > host_data.target_len())
+        && options.preserve_host_boundary)
+        || (options.monic && pattern_data.node_count() > host_data.node_count())
+        || (options.monic && pattern_data.edge_count() > host_data.edge_count())
     {
         return Vec::new();
     }
@@ -109,13 +179,20 @@ where
         pattern_data.edge_count(),
         host_data.edge_count(),
     );
-    search(&pattern_data, &host_data, &mut state, &mut matches);
+    search(
+        &pattern_data,
+        &host_data,
+        options,
+        &mut state,
+        &mut matches,
+    );
     matches
 }
 
-fn search<O: Eq, A: Eq>(
+fn search<O: PartialEq, A: PartialEq>(
     pattern: &PreparedOpenHypergraph<O, A>,
     host: &PreparedOpenHypergraph<O, A>,
+    options: MatchOptions,
     state: &mut SearchState,
     matches: &mut Vec<StrictOpenHypergraphMatch>,
 ) {
@@ -139,41 +216,50 @@ fn search<O: Eq, A: Eq>(
 
     // VF2/Ullmann-style branching heuristic: always expand the currently most
     // constrained unmapped pattern element first.
-    let next = choose_next(pattern, host, state);
+    let next = choose_next(pattern, host, options, state);
     match next {
         NextPatternElement::Edge(pattern_edge) => {
-            let candidates = edge_candidates(pattern, host, state, pattern_edge);
+            let candidates = edge_candidates(pattern, host, options, state, pattern_edge);
             for host_edge in candidates {
                 let mut assigned_nodes = Vec::new();
                 state.pattern_to_host_edge[pattern_edge] = Some(host_edge);
-                state.host_edge_used[host_edge] = true;
-                if assign_nodes_for_edge(pattern, host, state, pattern_edge, host_edge, &mut assigned_nodes) {
-                    search(pattern, host, state, matches);
+                state.host_edge_load[host_edge] += 1;
+                if assign_nodes_for_edge(
+                    pattern,
+                    host,
+                    options,
+                    state,
+                    pattern_edge,
+                    host_edge,
+                    &mut assigned_nodes,
+                ) {
+                    search(pattern, host, options, state, matches);
                 }
                 for (pattern_node, host_node) in assigned_nodes.into_iter().rev() {
                     state.pattern_to_host_node[pattern_node] = None;
-                    state.host_node_used[host_node] = false;
+                    state.host_node_load[host_node] -= 1;
                 }
                 state.pattern_to_host_edge[pattern_edge] = None;
-                state.host_edge_used[host_edge] = false;
+                state.host_edge_load[host_edge] -= 1;
             }
         }
         NextPatternElement::Node(pattern_node) => {
-            let candidates = node_candidates(pattern, host, state, pattern_node);
+            let candidates = node_candidates(pattern, host, options, state, pattern_node);
             for host_node in candidates {
                 state.pattern_to_host_node[pattern_node] = Some(host_node);
-                state.host_node_used[host_node] = true;
-                search(pattern, host, state, matches);
+                state.host_node_load[host_node] += 1;
+                search(pattern, host, options, state, matches);
                 state.pattern_to_host_node[pattern_node] = None;
-                state.host_node_used[host_node] = false;
+                state.host_node_load[host_node] -= 1;
             }
         }
     }
 }
 
-fn choose_next<O: Eq, A: Eq>(
+fn choose_next<O: PartialEq, A: PartialEq>(
     pattern: &PreparedOpenHypergraph<O, A>,
     host: &PreparedOpenHypergraph<O, A>,
+    options: MatchOptions,
     state: &SearchState,
 ) -> NextPatternElement {
     let mut best_edge = None;
@@ -182,7 +268,7 @@ fn choose_next<O: Eq, A: Eq>(
         if state.pattern_to_host_edge[pattern_edge].is_some() {
             continue;
         }
-        let count = edge_candidates(pattern, host, state, pattern_edge).len();
+        let count = edge_candidates(pattern, host, options, state, pattern_edge).len();
         if count < best_edge_count {
             best_edge_count = count;
             best_edge = Some(pattern_edge);
@@ -198,7 +284,7 @@ fn choose_next<O: Eq, A: Eq>(
         if state.pattern_to_host_node[pattern_node].is_some() {
             continue;
         }
-        let count = node_candidates(pattern, host, state, pattern_node).len();
+        let count = node_candidates(pattern, host, options, state, pattern_node).len();
         if count < best_node_count {
             best_node_count = count;
             best_node = Some(pattern_node);
@@ -207,45 +293,62 @@ fn choose_next<O: Eq, A: Eq>(
     NextPatternElement::Node(best_node.expect("incomplete search state must have unmapped node or edge"))
 }
 
-fn edge_candidates<O: Eq, A: Eq>(
+fn edge_candidates<O: PartialEq, A: PartialEq>(
     pattern: &PreparedOpenHypergraph<O, A>,
     host: &PreparedOpenHypergraph<O, A>,
+    options: MatchOptions,
     state: &SearchState,
     pattern_edge: EdgeId,
 ) -> Vec<EdgeId> {
     let mut out = Vec::new();
     for host_edge in 0..host.edge_count() {
-        if state.host_edge_used[host_edge] {
+        if options.monic && state.host_edge_load[host_edge] > 0 {
             continue;
         }
-        if edge_candidate_ok(pattern, host, state, pattern_edge, host_edge) {
+        if edge_candidate_ok(
+            pattern,
+            host,
+            options,
+            state,
+            pattern_edge,
+            host_edge,
+        ) {
             out.push(host_edge);
         }
     }
     out
 }
 
-fn node_candidates<O: Eq, A: Eq>(
+fn node_candidates<O: PartialEq, A: PartialEq>(
     pattern: &PreparedOpenHypergraph<O, A>,
     host: &PreparedOpenHypergraph<O, A>,
+    options: MatchOptions,
     state: &SearchState,
     pattern_node: NodeId,
 ) -> Vec<NodeId> {
     let mut out = Vec::new();
     for host_node in 0..host.node_count() {
-        if state.host_node_used[host_node] {
+        if options.monic && state.host_node_load[host_node] > 0 {
             continue;
         }
-        if node_candidate_ok(pattern, host, state, pattern_node, host_node) {
+        if node_candidate_ok(
+            pattern,
+            host,
+            options,
+            state,
+            pattern_node,
+            host_node,
+        ) {
             out.push(host_node);
         }
     }
     out
 }
 
-fn edge_candidate_ok<O: Eq, A: Eq>(
+fn edge_candidate_ok<O: PartialEq, A: PartialEq>(
     pattern: &PreparedOpenHypergraph<O, A>,
     host: &PreparedOpenHypergraph<O, A>,
+    options: MatchOptions,
     state: &SearchState,
     pattern_edge: EdgeId,
     host_edge: EdgeId,
@@ -264,7 +367,15 @@ fn edge_candidate_ok<O: Eq, A: Eq>(
         match state.pattern_to_host_node[pattern_node] {
             Some(mapped) if mapped != host_node => return false,
             None => {
-                if state.host_node_used[host_node] || !node_candidate_static_ok(pattern, host, pattern_node, host_node) {
+                if (options.monic && state.host_node_load[host_node] > 0)
+                    || !node_candidate_static_ok(
+                        pattern,
+                        host,
+                        options.preserve_host_boundary,
+                        pattern_node,
+                        host_node,
+                    )
+                {
                     return false;
                 }
             }
@@ -276,7 +387,15 @@ fn edge_candidate_ok<O: Eq, A: Eq>(
         match state.pattern_to_host_node[pattern_node] {
             Some(mapped) if mapped != host_node => return false,
             None => {
-                if state.host_node_used[host_node] || !node_candidate_static_ok(pattern, host, pattern_node, host_node) {
+                if (options.monic && state.host_node_load[host_node] > 0)
+                    || !node_candidate_static_ok(
+                        pattern,
+                        host,
+                        options.preserve_host_boundary,
+                        pattern_node,
+                        host_node,
+                    )
+                {
                     return false;
                 }
             }
@@ -285,8 +404,8 @@ fn edge_candidate_ok<O: Eq, A: Eq>(
     }
 
     // If the current pattern edge touches the same node several times, every
-    // corresponding host port must point at the same host node. Distinct pattern
-    // nodes must still map injectively.
+    // corresponding host port must point at the same host node. When `monic`
+    // is enabled, distinct pattern nodes must still map injectively.
     let mut local_pattern_to_host = std::collections::BTreeMap::new();
     let mut local_host_used = std::collections::BTreeSet::new();
     for (&pattern_node, &host_node) in p_edge.sources.iter().zip(h_edge.sources.iter()) {
@@ -294,7 +413,10 @@ fn edge_candidate_ok<O: Eq, A: Eq>(
             if existing != host_node {
                 return false;
             }
-        } else if state.pattern_to_host_node[pattern_node].is_none() && !local_host_used.insert(host_node) {
+        } else if options.monic
+            && state.pattern_to_host_node[pattern_node].is_none()
+            && !local_host_used.insert(host_node)
+        {
             return false;
         }
     }
@@ -303,7 +425,10 @@ fn edge_candidate_ok<O: Eq, A: Eq>(
             if existing != host_node {
                 return false;
             }
-        } else if state.pattern_to_host_node[pattern_node].is_none() && !local_host_used.insert(host_node) {
+        } else if options.monic
+            && state.pattern_to_host_node[pattern_node].is_none()
+            && !local_host_used.insert(host_node)
+        {
             return false;
         }
     }
@@ -311,9 +436,10 @@ fn edge_candidate_ok<O: Eq, A: Eq>(
     true
 }
 
-fn assign_nodes_for_edge<O: Eq, A: Eq>(
+fn assign_nodes_for_edge<O: PartialEq, A: PartialEq>(
     pattern: &PreparedOpenHypergraph<O, A>,
     host: &PreparedOpenHypergraph<O, A>,
+    options: MatchOptions,
     state: &mut SearchState,
     pattern_edge: EdgeId,
     host_edge: EdgeId,
@@ -323,12 +449,28 @@ fn assign_nodes_for_edge<O: Eq, A: Eq>(
     let h_edge = host.edge(host_edge);
 
     for (&pattern_node, &host_node) in p_edge.sources.iter().zip(h_edge.sources.iter()) {
-        if !assign_single_node(pattern, host, state, pattern_node, host_node, assigned_nodes) {
+        if !assign_single_node(
+            pattern,
+            host,
+            options,
+            state,
+            pattern_node,
+            host_node,
+            assigned_nodes,
+        ) {
             return false;
         }
     }
     for (&pattern_node, &host_node) in p_edge.targets.iter().zip(h_edge.targets.iter()) {
-        if !assign_single_node(pattern, host, state, pattern_node, host_node, assigned_nodes) {
+        if !assign_single_node(
+            pattern,
+            host,
+            options,
+            state,
+            pattern_node,
+            host_node,
+            assigned_nodes,
+        ) {
             return false;
         }
     }
@@ -336,9 +478,10 @@ fn assign_nodes_for_edge<O: Eq, A: Eq>(
     true
 }
 
-fn assign_single_node<O: Eq, A: Eq>(
+fn assign_single_node<O: PartialEq, A: PartialEq>(
     pattern: &PreparedOpenHypergraph<O, A>,
     host: &PreparedOpenHypergraph<O, A>,
+    options: MatchOptions,
     state: &mut SearchState,
     pattern_node: NodeId,
     host_node: NodeId,
@@ -347,12 +490,20 @@ fn assign_single_node<O: Eq, A: Eq>(
     if let Some(mapped) = state.pattern_to_host_node[pattern_node] {
         return mapped == host_node;
     }
-    if state.host_node_used[host_node] || !node_candidate_static_ok(pattern, host, pattern_node, host_node) {
+    if (options.monic && state.host_node_load[host_node] > 0)
+        || !node_candidate_static_ok(
+            pattern,
+            host,
+            options.preserve_host_boundary,
+            pattern_node,
+            host_node,
+        )
+    {
         return false;
     }
 
     state.pattern_to_host_node[pattern_node] = Some(host_node);
-    state.host_node_used[host_node] = true;
+    state.host_node_load[host_node] += 1;
     assigned_nodes.push((pattern_node, host_node));
 
     if !node_incidence_consistent(pattern, host, state, pattern_node, host_node) {
@@ -362,20 +513,28 @@ fn assign_single_node<O: Eq, A: Eq>(
     true
 }
 
-fn node_candidate_ok<O: Eq, A: Eq>(
+fn node_candidate_ok<O: PartialEq, A: PartialEq>(
     pattern: &PreparedOpenHypergraph<O, A>,
     host: &PreparedOpenHypergraph<O, A>,
+    options: MatchOptions,
     state: &SearchState,
     pattern_node: NodeId,
     host_node: NodeId,
 ) -> bool {
-    node_candidate_static_ok(pattern, host, pattern_node, host_node)
+    node_candidate_static_ok(
+        pattern,
+        host,
+        options.preserve_host_boundary,
+        pattern_node,
+        host_node,
+    )
         && node_incidence_consistent(pattern, host, state, pattern_node, host_node)
 }
 
-fn node_candidate_static_ok<O: Eq, A: Eq>(
+fn node_candidate_static_ok<O: PartialEq, A: PartialEq>(
     pattern: &PreparedOpenHypergraph<O, A>,
     host: &PreparedOpenHypergraph<O, A>,
+    preserve_host_boundary: bool,
     pattern_node: NodeId,
     host_node: NodeId,
 ) -> bool {
@@ -385,13 +544,14 @@ fn node_candidate_static_ok<O: Eq, A: Eq>(
 
     let p_node = pattern.node(pattern_node);
     let h_node = host.node(host_node);
-    p_node.source_positions == h_node.source_positions
-        && p_node.target_positions == h_node.target_positions
+    (!preserve_host_boundary
+        || (p_node.source_positions == h_node.source_positions
+            && p_node.target_positions == h_node.target_positions))
         && p_node.source_incidence_count <= h_node.source_incidence_count
         && p_node.target_incidence_count <= h_node.target_incidence_count
 }
 
-fn node_incidence_consistent<O: Eq, A: Eq>(
+fn node_incidence_consistent<O: PartialEq, A: PartialEq>(
     pattern: &PreparedOpenHypergraph<O, A>,
     host: &PreparedOpenHypergraph<O, A>,
     state: &SearchState,
@@ -598,7 +758,7 @@ where
 
 #[cfg(test)]
 mod tests {
-    use super::enumerate_matches;
+    use super::{enumerate_matches, enumerate_subgraph_matches_with_options, MatchOptions};
     use open_hypergraphs::array::vec::VecArray;
     use open_hypergraphs::finite_function::FiniteFunction;
     use open_hypergraphs::indexed_coproduct::IndexedCoproduct;
@@ -729,5 +889,47 @@ mod tests {
         let matches = enumerate_matches(&pattern, &host);
         assert_eq!(matches.len(), 2);
         assert_eq!(matches[0].edge_map.len(), 1);
+    }
+
+    #[test]
+    fn allows_non_monic_self_loop_match_when_enabled() {
+        let pattern = strict_open_hypergraph(
+            vec![NodeLabel::A, NodeLabel::A, NodeLabel::A],
+            vec![EdgeLabel::F, EdgeLabel::G],
+            vec![vec![0], vec![1]],
+            vec![vec![1], vec![2]],
+            vec![],
+            vec![],
+        );
+        let host = strict_open_hypergraph(
+            vec![NodeLabel::A],
+            vec![EdgeLabel::F, EdgeLabel::G],
+            vec![vec![0], vec![0]],
+            vec![vec![0], vec![0]],
+            vec![],
+            vec![],
+        );
+
+        let monic_matches = enumerate_subgraph_matches_with_options(
+            &pattern,
+            &host,
+            MatchOptions {
+                preserve_host_boundary: false,
+                monic: true,
+            },
+        );
+        assert!(monic_matches.is_empty());
+
+        let non_monic_matches = enumerate_subgraph_matches_with_options(
+            &pattern,
+            &host,
+            MatchOptions {
+                preserve_host_boundary: false,
+                monic: false,
+            },
+        );
+        assert_eq!(non_monic_matches.len(), 1);
+        assert_eq!(non_monic_matches[0].node_map, vec![0, 0, 0]);
+        assert_eq!(non_monic_matches[0].edge_map, vec![0, 1]);
     }
 }
