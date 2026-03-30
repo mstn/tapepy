@@ -8,11 +8,28 @@ We define a tape semantics for a very small subset of Python. The goal is to sho
 
 The intuition behind this approach is that we can represent programs as a multi-layer algebra: one layer describes data dependencies, and the other encodes alternative control flow. The idea is not new (see for example [3]), but it has not, to our knowledge, been explored in practice for compiler design and optimization.
 
-The main advantage is that it can surface parallelism in programs, making the IR suitable for optimizations targeting GPUs and similar architectures. To do that, we need a well-defined mapping from tape syntax to hypergraphs.
+The main advantage is that it can surface parallelism in programs, making the IR suitable for optimizations targeting GPUs and similar architectures. For example, let's consider this simple sequential Python program. The two if statements are independent because they don't share data dependencies.
 
-The "surface parallelism" example is meant to illustrate this: for a carefully crafted map, in this specific example, programs that differ only in parallel scheduling maps to the same hypergraph, up to a small amount of rewriting to eliminate artifacts. This is presented as an example, not a claim of a general result.
+```python
+x = 10000
+y = 20000
 
-Based on [open-hypergraphs](https://github.com/hellas-ai/open-hypergraphs).
+if x > 1:
+    x = x - 1
+else:
+    x = x + 1
+
+if y > 2:
+    y = y - 2
+else:
+    y = y + 2
+
+x = x + y
+```
+
+We convert the program into a monomial tape representation, which we then map to a two-color hypergraph. The two colors correspond to the two types of “tensors” used in tape diagrams. In this example, programs that differ only in how their operations are scheduled in parallel, up to certain Frobenius rewrites, end up producing the same hypergraph. The final result illustrates two if statements that can be executed in parallel.
+
+![TapePy IR](docs/images/ir.svg)
 
 ## Getting started
 
@@ -27,3 +44,5 @@ cargo run -- --home-folder .tapepy compile examples/surfacing_parallelism.py
 1. Bonchi, Filippo, Alessandro Di Giorgio, and Elena Di Lavore. "A Diagrammatic Algebra for Program Logics." International Conference on Foundations of Software Science and Computation Structures. Cham: Springer Nature Switzerland, 2025. [pdf](https://arxiv.org/abs/2410.03561)
 2. Bonchi, Filippo, Alessandro Di Giorgio, and Alessio Santamaria. "Deconstructing the calculus of relations with tape diagrams." Proceedings of the ACM on Programming Languages 7.POPL (2023): 1864-1894. [pdf](https://dl.acm.org/doi/pdf/10.1145/3571257)
 3. Stefanescu, Gheorghe. Network algebra. Springer Science & Business Media, 2000.
+
+Based on [open-hypergraphs](https://github.com/hellas-ai/open-hypergraphs).
